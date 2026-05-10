@@ -4,7 +4,12 @@
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
+    "start:dev": "expo start --dev-client",
+    "start:tunnel": "expo start --dev-client --tunnel",
+    "build:ios:standalone": "eas build --profile preview --platform ios",
+    "build:ios:store": "eas build --profile production --platform ios",
     "ios": "expo run:ios",
+    "ios:sim": "expo start --ios --go",
     "android": "expo run:android"
   },
   "dependencies": {

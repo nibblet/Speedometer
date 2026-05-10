@@ -33,6 +33,9 @@ type TripState = {
 type TripContextValue = TripState & {
   resetTrip: () => void;
   requestPermission: () => Promise<boolean>;
+  /** Dev-only: synthetic speed/heading for testing UI without driving */
+  devSimulateMotion: boolean;
+  setDevSimulateMotion: (on: boolean) => void;
 };
 
 const initialState: TripState = {
@@ -49,6 +52,12 @@ const initialState: TripState = {
 
 const TripContext = createContext<TripContextValue | null>(null);
 
+/** True bearing in 0..360 — fixes JS `%` leaving negative remainders. */
+function normalizeHeadingDeg(deg: number): number {
+  if (!Number.isFinite(deg)) return 0;
+  return ((deg % 360) + 360) % 360;
+}
+
 function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
@@ -64,6 +73,10 @@ function haversineMeters(a: LatLng, b: LatLng): number {
 
 export function TripProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<TripState>(initialState);
+  const [devSimulateMotion, setDevSimulateMotion] = useState(false);
+  const simTRef = useRef(0);
+  const simFrameRef = useRef<number | null>(null);
+  const devSimulateMotionRef = useRef(false);
   const speedSamplesRef = useRef<number[]>([]);
   const stateRef = useRef<TripState>(initialState);
   const subRef = useRef<Location.LocationSubscription | null>(null);
@@ -74,6 +87,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    devSimulateMotionRef.current = __DEV__ && devSimulateMotion;
+  }, [devSimulateMotion]);
 
   const resetTrip = useCallback(() => {
     speedSamplesRef.current = [];
@@ -127,25 +144,49 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         },
         (loc) => {
           if (cancelled) return;
-          const rawMs = loc.coords.speed && loc.coords.speed > 0 ? loc.coords.speed : 0;
-          const rawMph = rawMs * MS_TO_MPH;
-
-          // Smooth speed
-          const samples = speedSamplesRef.current;
-          samples.push(rawMph);
-          if (samples.length > SMOOTH_WINDOW) samples.shift();
-          const smoothed =
-            samples.reduce((acc, v) => acc + v, 0) / samples.length;
-          const speedMph = smoothed < 0.5 ? 0 : smoothed; // dead-zone
-
           const newPos: LatLng = {
             latitude: loc.coords.latitude,
             longitude: loc.coords.longitude,
           };
 
-          // Heading from GPS course when moving; else keep prior
+          if (devSimulateMotionRef.current) {
+            setState((prev) => {
+              let nextDistance = prev.distanceMiles;
+              let nextBreadcrumb = prev.breadcrumb;
+              if (prev.position) {
+                const dM = haversineMeters(prev.position, newPos);
+                if (dM >= MIN_MOVE_METERS) {
+                  nextDistance = prev.distanceMiles + dM / 1609.344;
+                  nextBreadcrumb = [...prev.breadcrumb, newPos];
+                }
+              } else {
+                nextBreadcrumb = [newPos];
+              }
+              return {
+                ...prev,
+                position: newPos,
+                distanceMiles: nextDistance,
+                breadcrumb: nextBreadcrumb,
+              };
+            });
+            return;
+          }
+
+          const rawMs = loc.coords.speed && loc.coords.speed > 0 ? loc.coords.speed : 0;
+          const rawMph = rawMs * MS_TO_MPH;
+
+          const samples = speedSamplesRef.current;
+          samples.push(rawMph);
+          if (samples.length > SMOOTH_WINDOW) samples.shift();
+          const smoothed =
+            samples.reduce((acc, v) => acc + v, 0) / samples.length;
+          const speedMph = smoothed < 0.5 ? 0 : smoothed;
+
           const courseDeg = loc.coords.heading;
-          const useGpsHeading = speedMph > 1.5 && courseDeg != null && courseDeg >= 0;
+          const useGpsHeading =
+            speedMph > 1.5 &&
+            courseDeg != null &&
+            Number.isFinite(courseDeg);
 
           setState((prev) => {
             let nextDistance = prev.distanceMiles;
@@ -164,7 +205,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
               ...prev,
               speedMph,
               maxMph: Math.max(prev.maxMph, speedMph),
-              headingDeg: useGpsHeading ? (courseDeg as number) : prev.headingDeg,
+              headingDeg: useGpsHeading
+                ? normalizeHeadingDeg(courseDeg as number)
+                : prev.headingDeg,
               position: newPos,
               distanceMiles: nextDistance,
               breadcrumb: nextBreadcrumb,
@@ -177,12 +220,13 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       // Compass heading from device sensors (used when stopped)
       const headingSub = await Location.watchHeadingAsync((h) => {
         if (cancelled) return;
+        if (devSimulateMotionRef.current) return;
         // Only use compass heading when essentially stationary
         setState((prev) => {
           if (prev.speedMph > 1.5) return prev;
-          const trueHeading = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-          if (trueHeading < 0) return prev;
-          return { ...prev, headingDeg: trueHeading };
+          const raw = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+          if (raw < 0 || !Number.isFinite(raw)) return prev;
+          return { ...prev, headingDeg: normalizeHeadingDeg(raw) };
         });
       });
       headingSubRef.current = headingSub;
@@ -217,9 +261,51 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [persistAndReset]);
 
+  // Synthetic motion for simulator / desk testing (__DEV__ only)
+  useEffect(() => {
+    if (!__DEV__ || !devSimulateMotion) {
+      if (simFrameRef.current != null) {
+        cancelAnimationFrame(simFrameRef.current);
+        simFrameRef.current = null;
+      }
+      return;
+    }
+    let last = Date.now();
+    const loop = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      simTRef.current += dt;
+      const t = simTRef.current;
+      const simSpeed = Math.max(0, 11.5 + 12 * Math.sin(t * 0.85));
+      const simHeading = normalizeHeadingDeg((t * 38) % 360);
+      setState((prev) => ({
+        ...prev,
+        speedMph: simSpeed,
+        headingDeg: simHeading,
+        maxMph: Math.max(prev.maxMph, simSpeed),
+      }));
+      simFrameRef.current = requestAnimationFrame(loop);
+    };
+    simFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (simFrameRef.current != null) cancelAnimationFrame(simFrameRef.current);
+      simFrameRef.current = null;
+    };
+  }, [devSimulateMotion]);
+
   const value = useMemo<TripContextValue>(
-    () => ({ ...state, resetTrip, requestPermission }),
-    [state, resetTrip, requestPermission],
+    () => ({
+      ...state,
+      resetTrip,
+      requestPermission,
+      devSimulateMotion: __DEV__ ? devSimulateMotion : false,
+      setDevSimulateMotion: __DEV__
+        ? setDevSimulateMotion
+        : () => {
+            /* no-op in production */
+          },
+    }),
+    [state, resetTrip, requestPermission, devSimulateMotion],
   );
 
   return <TripContext.Provider value={value}>{children}</TripContext.Provider>;
