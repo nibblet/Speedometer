@@ -13,6 +13,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { TripProvider } from '@/context/TripContext';
+import { AppearanceProvider, useAppearance } from '@/context/AppearanceContext';
 import { initDb } from '@/db';
 import { colors } from '@/theme';
 
@@ -55,11 +56,18 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <TripProvider>
-        <StatusBar style="light" />
-        <RootNavigator />
+        <AppearanceProvider>
+          <ThemedStatusBar />
+          <RootNavigator />
+        </AppearanceProvider>
       </TripProvider>
     </SafeAreaProvider>
   );
+}
+
+function ThemedStatusBar() {
+  const { resolved } = useAppearance();
+  return <StatusBar style={resolved === 'day' ? 'dark' : 'light'} />;
 }
 
 const styles = StyleSheet.create({

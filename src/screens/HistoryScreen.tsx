@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors, fonts, radius, spacing } from '@/theme';
+import { fonts, radius, spacing, type ThemePalette } from '@/theme';
+import { useAppearance } from '@/context/AppearanceContext';
 import { listTrips, deleteTrip, deleteAllTrips, Trip } from '@/db';
 
 function formatDate(ms: number): string {
@@ -38,7 +39,90 @@ function formatDuration(seconds: number): string {
   return `${s}s`;
 }
 
+function createHistoryStyles(palette: ThemePalette) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: palette.forgeBlack },
+    header: {
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.lg,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    title: {
+      color: palette.white,
+      fontFamily: fonts.display,
+      fontSize: 18,
+      letterSpacing: 6,
+    },
+    clearLabel: {
+      color: palette.forgeOrange,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 3,
+    },
+    empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+    emptyTitle: {
+      color: palette.forgeOrange,
+      fontFamily: fonts.display,
+      fontSize: 16,
+      letterSpacing: 4,
+      marginBottom: spacing.sm,
+    },
+    emptyText: {
+      color: palette.dim,
+      fontFamily: fonts.body,
+      fontSize: 14,
+      textAlign: 'center',
+      maxWidth: 280,
+    },
+    row: {
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.md,
+      padding: spacing.lg,
+      backgroundColor: palette.slate,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+    },
+    rowMain: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      marginBottom: spacing.md,
+    },
+    rowDate: {
+      color: palette.white,
+      fontFamily: fonts.display,
+      fontSize: 18,
+      letterSpacing: 1,
+    },
+    rowTime: {
+      color: palette.dim,
+      fontFamily: fonts.body,
+      fontSize: 13,
+    },
+    rowStats: { flexDirection: 'row', justifyContent: 'space-between' },
+    rowStat: { flex: 1 },
+    rowStatLabel: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 10,
+      letterSpacing: 2,
+      marginBottom: 4,
+    },
+    rowStatValue: {
+      color: palette.forgeOrange,
+      fontFamily: fonts.display,
+      fontSize: 16,
+    },
+  });
+}
+
 export default function HistoryScreen() {
+  const { palette } = useAppearance();
+  const styles = useMemo(() => createHistoryStyles(palette), [palette]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -121,7 +205,7 @@ export default function HistoryScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={colors.forgeOrange}
+              tintColor={palette.forgeOrange}
             />
           }
           renderItem={({ item }) => (
@@ -129,7 +213,7 @@ export default function HistoryScreen() {
               onLongPress={() => onDelete(item)}
               style={({ pressed }) => [
                 styles.row,
-                pressed && { backgroundColor: colors.slateElevated },
+                pressed && { backgroundColor: palette.slateElevated },
               ]}
             >
               <View style={styles.rowMain}>
@@ -137,9 +221,9 @@ export default function HistoryScreen() {
                 <Text style={styles.rowTime}>{formatTime(item.startedAt)}</Text>
               </View>
               <View style={styles.rowStats}>
-                <RowStat label="DIST" value={`${item.distanceMiles.toFixed(2)} mi`} />
-                <RowStat label="TIME" value={formatDuration(item.durationSeconds)} />
-                <RowStat label="MAX" value={`${Math.round(item.maxMph)} mph`} />
+                <RowStat label="DIST" value={`${item.distanceMiles.toFixed(2)} mi`} styles={styles} />
+                <RowStat label="TIME" value={formatDuration(item.durationSeconds)} styles={styles} />
+                <RowStat label="MAX" value={`${Math.round(item.maxMph)} mph`} styles={styles} />
               </View>
             </Pressable>
           )}
@@ -149,7 +233,15 @@ export default function HistoryScreen() {
   );
 }
 
-function RowStat({ label, value }: { label: string; value: string }) {
+function RowStat({
+  label,
+  value,
+  styles,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof createHistoryStyles>;
+}) {
   return (
     <View style={styles.rowStat}>
       <Text style={styles.rowStatLabel}>{label}</Text>
@@ -157,82 +249,3 @@ function RowStat({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.forgeBlack },
-  header: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    fontFamily: fonts.display,
-    fontSize: 18,
-    letterSpacing: 6,
-  },
-  clearLabel: {
-    color: colors.forgeOrange,
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    letterSpacing: 3,
-  },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  emptyTitle: {
-    color: colors.forgeOrange,
-    fontFamily: fonts.display,
-    fontSize: 16,
-    letterSpacing: 4,
-    marginBottom: spacing.sm,
-  },
-  emptyText: {
-    color: colors.dim,
-    fontFamily: fonts.body,
-    fontSize: 14,
-    textAlign: 'center',
-    maxWidth: 280,
-  },
-  row: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    padding: spacing.lg,
-    backgroundColor: colors.slate,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.slateBorder,
-  },
-  rowMain: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: spacing.md,
-  },
-  rowDate: {
-    color: colors.white,
-    fontFamily: fonts.display,
-    fontSize: 18,
-    letterSpacing: 1,
-  },
-  rowTime: {
-    color: colors.dim,
-    fontFamily: fonts.body,
-    fontSize: 13,
-  },
-  rowStats: { flexDirection: 'row', justifyContent: 'space-between' },
-  rowStat: { flex: 1 },
-  rowStatLabel: {
-    color: colors.dim,
-    fontFamily: fonts.bold,
-    fontSize: 10,
-    letterSpacing: 2,
-    marginBottom: 4,
-  },
-  rowStatValue: {
-    color: colors.forgeOrange,
-    fontFamily: fonts.display,
-    fontSize: 16,
-  },
-});

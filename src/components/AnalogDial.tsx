@@ -10,7 +10,8 @@ import Svg, {
   LinearGradient,
   Stop,
 } from 'react-native-svg';
-import { colors, fonts, SPEED_MAX_MPH } from '@/theme';
+import { fonts, SPEED_MAX_MPH } from '@/theme';
+import { useAppearance } from '@/context/AppearanceContext';
 
 type Props = {
   size: number;
@@ -62,13 +63,17 @@ const TRAIL_MAX_SAMPLES = 36;
 const NEEDLE_TIP_FR = 0.78;
 
 export function AnalogDial({ size, speed, max = SPEED_MAX_MPH }: Props) {
+  const { palette: colors } = useAppearance();
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - 8;
   const tickOuter = r;
-  const tickMajorInner = r - size * 0.06;
-  const tickMinorInner = r - size * 0.03;
-  const labelR = r - size * 0.13;
+  // Major ticks stay on the rim band; label centers sit clearly *inside* tick inner ends so glyphs never cover ticks.
+  const tickMajorInner = r - size * 0.072;
+  const tickMinorInner = r - size * 0.038;
+  const labelR = r - size * 0.148;
+  // Still larger than original 0.06×size, but small enough to clear the tick ring.
+  const labelFont = size * 0.088;
 
   const smoothSpeed = useRef(new Animated.Value(speed)).current;
   const [needleSpeed, setNeedleSpeed] = useState(speed);
@@ -199,9 +204,9 @@ export function AnalogDial({ size, speed, max = SPEED_MAX_MPH }: Props) {
             <SvgText
               key={`lbl-${v}`}
               x={p.x}
-              y={p.y + size * 0.018}
+              y={p.y + labelFont * 0.32}
               fill={colors.white}
-              fontSize={size * 0.06}
+              fontSize={labelFont}
               fontFamily={fonts.bold}
               textAnchor="middle"
             >

@@ -9,7 +9,12 @@ import React, {
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
-import { saveTrip } from '@/db';
+import {
+  saveTrip,
+  listCheckpoints,
+  insertCheckpointEvent,
+  type Checkpoint,
+} from '@/db';
 
 const MS_TO_MPH = 2.23694;
 const SMOOTH_WINDOW = 4; // moving-average window for speed
@@ -36,6 +41,9 @@ type TripContextValue = TripState & {
   /** Dev-only: synthetic speed/heading for testing UI without driving */
   devSimulateMotion: boolean;
   setDevSimulateMotion: (on: boolean) => void;
+  /** Saved checkpoint places (persisted); enter/exit recorded to SQLite while driving. */
+  checkpoints: Checkpoint[];
+  refreshCheckpoints: () => void;
 };
 
 const initialState: TripState = {
@@ -71,8 +79,51 @@ function haversineMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
+/** Enter at full radius; exit only after GPS leaves an expanded ring (reduces jitter). */
+function checkpointHysteresis(
+  wasInside: boolean,
+  distanceMeters: number,
+  radiusMeters: number,
+): boolean {
+  const exitStretch = 1.35;
+  if (!wasInside) return distanceMeters <= radiusMeters;
+  return distanceMeters <= radiusMeters * exitStretch;
+}
+
+function evaluateCheckpointTransitions(
+  pos: LatLng,
+  checkpoints: Checkpoint[],
+  insideIds: Set<number>,
+): void {
+  for (const cp of checkpoints) {
+    const d = haversineMeters(pos, {
+      latitude: cp.latitude,
+      longitude: cp.longitude,
+    });
+    const was = insideIds.has(cp.id);
+    const next = checkpointHysteresis(was, d, cp.radiusMeters);
+    if (next === was) continue;
+    if (next) insideIds.add(cp.id);
+    else insideIds.delete(cp.id);
+    try {
+      insertCheckpointEvent(cp.id, next ? 'enter' : 'exit');
+    } catch (e) {
+      console.warn('checkpoint event failed', e);
+    }
+  }
+}
+
+function loadCheckpointsSafe(): Checkpoint[] {
+  try {
+    return listCheckpoints();
+  } catch {
+    return [];
+  }
+}
+
 export function TripProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<TripState>(initialState);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(loadCheckpointsSafe);
   const [devSimulateMotion, setDevSimulateMotion] = useState(false);
   const simTRef = useRef(0);
   const simFrameRef = useRef<number | null>(null);
@@ -82,6 +133,8 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const subRef = useRef<Location.LocationSubscription | null>(null);
   const headingSubRef = useRef<Location.LocationSubscription | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const checkpointsRef = useRef<Checkpoint[]>(checkpoints);
+  const insideCheckpointIdsRef = useRef<Set<number>>(new Set());
 
   // Keep a ref of latest state so AppState listener can read it without stale closure.
   useEffect(() => {
@@ -91,6 +144,14 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     devSimulateMotionRef.current = __DEV__ && devSimulateMotion;
   }, [devSimulateMotion]);
+
+  useEffect(() => {
+    checkpointsRef.current = checkpoints;
+  }, [checkpoints]);
+
+  const refreshCheckpoints = useCallback(() => {
+    setCheckpoints(loadCheckpointsSafe());
+  }, []);
 
   const resetTrip = useCallback(() => {
     speedSamplesRef.current = [];
@@ -213,6 +274,12 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
               breadcrumb: nextBreadcrumb,
             };
           });
+
+          evaluateCheckpointTransitions(
+            newPos,
+            checkpointsRef.current,
+            insideCheckpointIdsRef.current,
+          );
         },
       );
       subRef.current = sub;
@@ -304,8 +371,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
         : () => {
             /* no-op in production */
           },
+      checkpoints,
+      refreshCheckpoints,
     }),
-    [state, resetTrip, requestPermission, devSimulateMotion],
+    [state, resetTrip, requestPermission, devSimulateMotion, checkpoints, refreshCheckpoints],
   );
 
   return <TripContext.Provider value={value}>{children}</TripContext.Provider>;

@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Line, Polygon, Text as SvgText } from 'react-native-svg';
-import { colors, fonts } from '@/theme';
+import { fonts } from '@/theme';
+import { useAppearance } from '@/context/AppearanceContext';
 
 type Props = {
   size: number;
@@ -21,6 +22,7 @@ function polar(cx: number, cy: number, r: number, angleDeg: number) {
 }
 
 export function CompassRose({ size, headingDeg }: Props) {
+  const { palette: colors } = useAppearance();
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - 4;

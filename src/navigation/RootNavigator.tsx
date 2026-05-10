@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
@@ -6,34 +6,32 @@ import {
   createBottomTabNavigator,
   BottomTabBarProps,
 } from '@react-navigation/bottom-tabs';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import { colors, fonts } from '@/theme';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { fonts, type ThemePalette } from '@/theme';
+import { useAppearance } from '@/context/AppearanceContext';
 import SpeedometerScreen from '@/screens/SpeedometerScreen';
 import MapScreen from '@/screens/MapScreen';
 import HistoryScreen from '@/screens/HistoryScreen';
 
 const Tab = createBottomTabNavigator();
 
-const navTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    background: colors.forgeBlack,
-    card: colors.forgeBlack,
-    border: colors.slateBorder,
-    primary: colors.forgeOrange,
-  },
-};
-
-function TabIcon({ name, active }: { name: string; active: boolean }) {
-  const stroke = active ? colors.forgeOrange : colors.dim;
+function TabIcon({
+  name,
+  active,
+  palette,
+}: {
+  name: string;
+  active: boolean;
+  palette: ThemePalette;
+}) {
+  const stroke = active ? palette.forgeOrange : palette.dim;
   if (name === 'Speedometer') {
     return (
       <Svg width={22} height={22} viewBox="0 0 24 24">
         <Circle cx={12} cy={12} r={9} stroke={stroke} strokeWidth={1.8} fill="none" />
         <Path
           d="M12 12 L 16 7"
-          stroke={active ? colors.forgeOrange : colors.bone}
+          stroke={active ? palette.forgeOrange : palette.bone}
           strokeWidth={2}
           strokeLinecap="round"
         />
@@ -56,7 +54,6 @@ function TabIcon({ name, active }: { name: string; active: boolean }) {
       </Svg>
     );
   }
-  // History
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
       <Circle cx={12} cy={12} r={9} stroke={stroke} strokeWidth={1.8} fill="none" />
@@ -72,7 +69,43 @@ function TabIcon({ name, active }: { name: string; active: boolean }) {
   );
 }
 
+function createTabStyles(palette: ThemePalette) {
+  return StyleSheet.create({
+    tabSafe: { backgroundColor: palette.forgeBlack },
+    tabBar: {
+      flexDirection: 'row',
+      backgroundColor: palette.slate,
+      borderTopWidth: 1,
+      borderTopColor: palette.slateBorder,
+      paddingHorizontal: 8,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    tabItem: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 6,
+      borderRadius: 12,
+    },
+    tabItemActive: {
+      backgroundColor: palette.forgeOrangeGlow,
+    },
+    tabLabel: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 10,
+      letterSpacing: 2,
+      marginTop: 4,
+    },
+    tabLabelActive: { color: palette.forgeOrange },
+  });
+}
+
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const { palette } = useAppearance();
+  const styles = useMemo(() => createTabStyles(palette), [palette]);
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.tabSafe}>
       <View style={styles.tabBar}>
@@ -95,10 +128,8 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               onPress={onPress}
               style={[styles.tabItem, focused && styles.tabItemActive]}
             >
-              <TabIcon name={route.name} active={focused} />
-              <Text
-                style={[styles.tabLabel, focused && styles.tabLabelActive]}
-              >
+              <TabIcon name={route.name} active={focused} palette={palette} />
+              <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>
                 {label}
               </Text>
             </Pressable>
@@ -110,6 +141,22 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export function RootNavigator() {
+  const { palette } = useAppearance();
+
+  const navTheme = useMemo(
+    () => ({
+      ...DarkTheme,
+      colors: {
+        ...DarkTheme.colors,
+        background: palette.forgeBlack,
+        card: palette.forgeBlack,
+        border: palette.slateBorder,
+        primary: palette.forgeOrange,
+      },
+    }),
+    [palette],
+  );
+
   return (
     <NavigationContainer theme={navTheme}>
       <Tab.Navigator
@@ -131,34 +178,3 @@ export function RootNavigator() {
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  tabSafe: { backgroundColor: colors.forgeBlack },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: colors.slate,
-    borderTopWidth: 1,
-    borderTopColor: colors.slateBorder,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  tabItemActive: {
-    backgroundColor: colors.forgeOrangeGlow,
-  },
-  tabLabel: {
-    color: colors.dim,
-    fontFamily: fonts.bold,
-    fontSize: 10,
-    letterSpacing: 2,
-    marginTop: 4,
-  },
-  tabLabelActive: { color: colors.forgeOrange },
-});
