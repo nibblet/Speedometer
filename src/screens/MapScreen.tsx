@@ -86,21 +86,19 @@ function createMapStyles(palette: ThemePalette) {
       marginBottom: 2,
     },
     statValue: { color: palette.white, fontFamily: fonts.display, fontSize: 16 },
-    dotOuter: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
+    cartMarker: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: palette.forgeOrangeGlow,
+      borderWidth: 2,
+      borderColor: palette.forgeOrange,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    dotInner: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
-      backgroundColor: palette.forgeOrange,
-      borderWidth: 2,
-      borderColor: palette.forgeBlack,
+    cartEmoji: {
+      fontSize: 24,
+      lineHeight: 28,
     },
     loopBar: {
       position: 'absolute',
@@ -249,9 +247,9 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>WAITING FOR GPS</Text>
+          <Text style={styles.emptyTitle}>🛺  WARMING UP THE CART</Text>
           <Text style={styles.emptyText}>
-            Once your position locks in, your live route will appear here.
+            Once the satellites find your fairway, your joyride shows up here.
           </Text>
         </View>
       </SafeAreaView>
@@ -303,30 +301,30 @@ export default function MapScreen() {
           />
         )}
         <Marker coordinate={trip.position} anchor={{ x: 0.5, y: 0.5 }}>
-          <View style={styles.dotOuter}>
-            <View style={styles.dotInner} />
+          <View style={styles.cartMarker}>
+            <Text style={styles.cartEmoji}>🛺</Text>
           </View>
         </Marker>
       </MapView>
 
       <SafeAreaView edges={['top']} style={styles.overlayTop} pointerEvents="box-none">
         <View style={styles.overlayCard}>
-          <Stat label="SPEED" value={`${Math.round(trip.speedMph)} mph`} styles={styles} />
-          <Stat label="TRIP" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
-          <Stat label="MAX" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
+          <Stat label="PUTT-PUTT" value={`${Math.round(trip.speedMph)} mph`} styles={styles} />
+          <Stat label="JOYRIDE" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
+          <Stat label="TOP CRUISE" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
         </View>
         <View style={styles.sunsetRow}>
-          <Text style={styles.sunsetLabel}>SUNSET</Text>
+          <Text style={styles.sunsetLabel}>⛳  TEE TIME LEFT</Text>
           <Text style={styles.sunsetValue}>
             {sunset.status === 'waiting' && '—'}
-            {sunset.status === 'until' && `${sunset.minutes} min until dark`}
-            {sunset.status === 'dark' && 'Past sunset'}
+            {sunset.status === 'until' && `${sunset.minutes} min 'til headlights`}
+            {sunset.status === 'dark' && 'Headlights on, partner'}
           </Text>
         </View>
       </SafeAreaView>
 
       <SafeAreaView edges={['bottom']} style={styles.loopBar} pointerEvents="box-none">
-        <Text style={styles.loopBarTitle}>SAVED LOOPS</Text>
+        <Text style={styles.loopBarTitle}>🛺  FAVORITE JAUNTS</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -348,7 +346,7 @@ export default function MapScreen() {
           })}
           {activeLoop != null && (
             <Pressable onPress={clearLoop} style={styles.loopChipClear}>
-              <Text style={styles.loopChipClearText}>CLEAR</Text>
+              <Text style={styles.loopChipClearText}>PARK IT</Text>
             </Pressable>
           )}
         </ScrollView>

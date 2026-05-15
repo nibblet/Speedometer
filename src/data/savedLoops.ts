@@ -30,7 +30,7 @@ function o(dLat: number, dLng: number): LatLng {
 export const SAVED_LOOPS: SavedLoop[] = [
   {
     id: 'home',
-    name: 'Home',
+    name: '🏠 Back to the Barn',
     coordinates: [
       o(0, 0),
       o(0.0022, 0.0011),
@@ -42,7 +42,7 @@ export const SAVED_LOOPS: SavedLoop[] = [
   },
   {
     id: 'kids_pool',
-    name: 'Kids Pool',
+    name: '🏊 Pool Patrol',
     coordinates: [
       o(0, 0),
       o(0.0015, 0.0028),
@@ -54,7 +54,7 @@ export const SAVED_LOOPS: SavedLoop[] = [
   },
   {
     id: 'big_park',
-    name: 'Big Park',
+    name: '⛳ Back Nine',
     coordinates: [
       o(0, 0),
       o(-0.002, 0.0015),
