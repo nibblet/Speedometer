@@ -88,11 +88,11 @@ function createMapStyles(palette: ThemePalette) {
     },
     statValue: { color: palette.white, fontFamily: fonts.display, fontSize: 16 },
     cartMarker: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       backgroundColor: palette.forgeOrangeGlow,
-      borderWidth: 2,
+      borderWidth: 1,
       borderColor: palette.forgeOrange,
       alignItems: 'center',
       justifyContent: 'center',
@@ -297,7 +297,12 @@ export default function MapScreen() {
             strokeWidth={4}
           />
         )}
-        <Marker coordinate={trip.position} anchor={{ x: 0.5, y: 0.5 }}>
+        <Marker
+          coordinate={trip.position}
+          anchor={{ x: 0.5, y: 0.5 }}
+          flat
+          rotation={trip.headingDeg}
+        >
           <View style={styles.cartMarker}>
             <CartIcon palette={palette} />
           </View>
@@ -370,26 +375,24 @@ function Stat({
 }
 
 function CartIcon({ palette }: { palette: ThemePalette }) {
-  const body = palette.bone;
   const roof = palette.forgeOrange;
   const tire = palette.forgeBlack;
   const trim = palette.forgeOrangeDim;
+  const windshield = palette.bone;
+  // Top-down view; "forward" is +Y up. Marker rotation aligns this with heading.
   return (
-    <Svg width={36} height={28} viewBox="0 0 44 32">
-      {/* roof */}
-      <Rect x={3} y={2} width={38} height={5} rx={2} fill={roof} />
-      {/* posts */}
-      <Rect x={5} y={6} width={2} height={11} fill={trim} />
-      <Rect x={37} y={6} width={2} height={11} fill={trim} />
-      {/* body */}
-      <Rect x={2} y={14} width={40} height={10} rx={3} fill={body} stroke={trim} strokeWidth={1} />
-      {/* windshield hint */}
-      <Rect x={6} y={16} width={32} height={2} rx={1} fill={trim} opacity={0.35} />
-      {/* wheels */}
-      <SvgCircle cx={11} cy={26} r={4} fill={tire} />
-      <SvgCircle cx={33} cy={26} r={4} fill={tire} />
-      <SvgCircle cx={11} cy={26} r={1.5} fill={body} />
-      <SvgCircle cx={33} cy={26} r={1.5} fill={body} />
+    <Svg width={22} height={28} viewBox="0 0 28 36">
+      {/* wheels (front + rear, just outside body) */}
+      <Rect x={2} y={6} width={3} height={5} rx={1} fill={tire} />
+      <Rect x={23} y={6} width={3} height={5} rx={1} fill={tire} />
+      <Rect x={2} y={25} width={3} height={5} rx={1} fill={tire} />
+      <Rect x={23} y={25} width={3} height={5} rx={1} fill={tire} />
+      {/* canopy / body seen from above */}
+      <Rect x={5} y={3} width={18} height={30} rx={4} fill={roof} stroke={trim} strokeWidth={1} />
+      {/* windshield strip near the front */}
+      <Rect x={7} y={5} width={14} height={4} rx={1.5} fill={windshield} opacity={0.85} />
+      {/* tiny seat divider so it reads as a cart, not a brick */}
+      <Rect x={7} y={18} width={14} height={1.5} rx={0.5} fill={trim} opacity={0.5} />
     </Svg>
   );
 }
