@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
 import MapView, { Polyline, Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
+import Svg, { Circle as SvgCircle, Rect } from 'react-native-svg';
 import { fonts, palettes, spacing, radius, type ThemePalette } from '@/theme';
 import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
@@ -87,18 +88,14 @@ function createMapStyles(palette: ThemePalette) {
     },
     statValue: { color: palette.white, fontFamily: fonts.display, fontSize: 16 },
     cartMarker: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
       backgroundColor: palette.forgeOrangeGlow,
       borderWidth: 2,
       borderColor: palette.forgeOrange,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    cartEmoji: {
-      fontSize: 24,
-      lineHeight: 28,
     },
     loopBar: {
       position: 'absolute',
@@ -247,7 +244,7 @@ export default function MapScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>🛺  WARMING UP THE CART</Text>
+          <Text style={styles.emptyTitle}>WARMING UP THE CART</Text>
           <Text style={styles.emptyText}>
             Once the satellites find your fairway, your joyride shows up here.
           </Text>
@@ -302,7 +299,7 @@ export default function MapScreen() {
         )}
         <Marker coordinate={trip.position} anchor={{ x: 0.5, y: 0.5 }}>
           <View style={styles.cartMarker}>
-            <Text style={styles.cartEmoji}>🛺</Text>
+            <CartIcon palette={palette} />
           </View>
         </Marker>
       </MapView>
@@ -314,7 +311,7 @@ export default function MapScreen() {
           <Stat label="TOP CRUISE" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
         </View>
         <View style={styles.sunsetRow}>
-          <Text style={styles.sunsetLabel}>⛳  TEE TIME LEFT</Text>
+          <Text style={styles.sunsetLabel}>DAYLIGHT</Text>
           <Text style={styles.sunsetValue}>
             {sunset.status === 'waiting' && '—'}
             {sunset.status === 'until' && `${sunset.minutes} min 'til headlights`}
@@ -324,7 +321,7 @@ export default function MapScreen() {
       </SafeAreaView>
 
       <SafeAreaView edges={['bottom']} style={styles.loopBar} pointerEvents="box-none">
-        <Text style={styles.loopBarTitle}>🛺  FAVORITE JAUNTS</Text>
+        <Text style={styles.loopBarTitle}>FAVORITE JAUNTS</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -369,5 +366,30 @@ function Stat({
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={styles.statValue}>{value}</Text>
     </View>
+  );
+}
+
+function CartIcon({ palette }: { palette: ThemePalette }) {
+  const body = palette.bone;
+  const roof = palette.forgeOrange;
+  const tire = palette.forgeBlack;
+  const trim = palette.forgeOrangeDim;
+  return (
+    <Svg width={36} height={28} viewBox="0 0 44 32">
+      {/* roof */}
+      <Rect x={3} y={2} width={38} height={5} rx={2} fill={roof} />
+      {/* posts */}
+      <Rect x={5} y={6} width={2} height={11} fill={trim} />
+      <Rect x={37} y={6} width={2} height={11} fill={trim} />
+      {/* body */}
+      <Rect x={2} y={14} width={40} height={10} rx={3} fill={body} stroke={trim} strokeWidth={1} />
+      {/* windshield hint */}
+      <Rect x={6} y={16} width={32} height={2} rx={1} fill={trim} opacity={0.35} />
+      {/* wheels */}
+      <SvgCircle cx={11} cy={26} r={4} fill={tire} />
+      <SvgCircle cx={33} cy={26} r={4} fill={tire} />
+      <SvgCircle cx={11} cy={26} r={1.5} fill={body} />
+      <SvgCircle cx={33} cy={26} r={1.5} fill={body} />
+    </Svg>
   );
 }
