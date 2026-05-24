@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   Pressable,
   useWindowDimensions,
@@ -18,6 +19,12 @@ import { CompassRose } from '@/components/CompassRose';
 import { DigitalReadout } from '@/components/DigitalReadout';
 
 type Mode = 'analog' | 'digital';
+
+const LOGO_DAY = require('@/assets/cartpath-day-logo.jpg');
+const LOGO_NIGHT = require('@/assets/cartpath-night-logo.jpg');
+const LOGO_HEIGHT = 45;
+const LOGO_DAY_ASPECT = 847 / 501;
+const LOGO_NIGHT_ASPECT = 847 / 581;
 
 function bearingLabel(deg: number): string {
   if (!Number.isFinite(deg)) return '---';
@@ -38,32 +45,39 @@ const APPEARANCE_LABELS: Record<AppearanceMode, string> = {
 function createStyles(palette: ThemePalette) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: palette.forgeBlack },
-    header: {
+    brandRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      alignSelf: 'stretch',
+      width: '100%',
       paddingHorizontal: spacing.xl,
       paddingTop: spacing.sm,
-      paddingBottom: spacing.md,
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'baseline',
+      paddingBottom: spacing.xs,
     },
-    brand: {
-      color: palette.white,
+    logoPressable: {
+      height: LOGO_HEIGHT,
+      justifyContent: 'center',
+    },
+    cartpathPressable: {
+      height: LOGO_HEIGHT,
+      justifyContent: 'center',
+    },
+    logoHero: {
+      height: LOGO_HEIGHT,
+    },
+    cartpath: {
       fontFamily: fonts.display,
-      fontSize: 16.5,
-      letterSpacing: 1,
+      fontSize: 20,
+      letterSpacing: 0.5,
     },
-    brandAccent: { color: palette.forgeOrange },
-    title: {
-      color: palette.dim,
-      fontFamily: fonts.bold,
-      fontSize: 9,
-      letterSpacing: 4,
-    },
+    cartpathCart: { color: palette.forgeOrange },
+    cartpathPath: { color: palette.white },
     simulateBtn: {
       alignSelf: 'center',
-      marginBottom: spacing.md,
-      paddingVertical: 8,
-      paddingHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+      paddingVertical: 6,
+      paddingHorizontal: spacing.md,
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: palette.slateBorder,
@@ -90,7 +104,7 @@ function createStyles(palette: ThemePalette) {
       borderWidth: 1,
       borderColor: palette.slateBorder,
       padding: 4,
-      marginBottom: spacing.lg,
+      marginBottom: spacing.xs,
       zIndex: 2,
       elevation: 4,
     },
@@ -114,8 +128,8 @@ function createStyles(palette: ThemePalette) {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      overflow: 'hidden',
       alignSelf: 'stretch',
+      overflow: 'hidden',
     },
     dialStack: {
       alignItems: 'center',
@@ -251,7 +265,13 @@ export default function SpeedometerScreen() {
   const digitalFontMax = Math.min(digitalContainerWidth * 0.44, 200);
 
   const trip = useTrip();
-  const { mode: appearanceMode, setMode: setAppearanceMode, palette } = useAppearance();
+  const {
+    mode: appearanceMode,
+    setMode: setAppearanceMode,
+    resolved,
+    palette,
+  } = useAppearance();
+  const logoAspect = resolved === 'day' ? LOGO_DAY_ASPECT : LOGO_NIGHT_ASPECT;
   const styles = useMemo(() => createStyles(palette), [palette]);
 
   const [mode, setMode] = useState<Mode>('analog');
@@ -265,20 +285,6 @@ export default function SpeedometerScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => setAppearanceModal(true)}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Appearance: tap to choose day, night, or auto"
-        >
-          <Text style={styles.brand}>
-            for<Text style={styles.brandAccent}>VEX</Text>
-          </Text>
-        </Pressable>
-        <Text style={styles.title}>SPEEDOMETER</Text>
-      </View>
-
       <Modal
         visible={appearanceModal}
         transparent
@@ -319,6 +325,35 @@ export default function SpeedometerScreen() {
         </View>
       </Modal>
 
+      <View style={styles.brandRow}>
+        <Pressable
+          style={styles.logoPressable}
+          onPress={() => setAppearanceModal(true)}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Appearance: tap to choose day, night, or auto"
+        >
+          <Image
+            source={resolved === 'day' ? LOGO_DAY : LOGO_NIGHT}
+            style={[styles.logoHero, { width: LOGO_HEIGHT * logoAspect }]}
+            resizeMode="contain"
+            accessibilityIgnoresInvertColors
+          />
+        </Pressable>
+        <Pressable
+          style={styles.cartpathPressable}
+          onPress={() => setAppearanceModal(true)}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Appearance: tap to choose day, night, or auto"
+        >
+          <Text style={styles.cartpath}>
+            <Text style={styles.cartpathCart}>CART</Text>
+            <Text style={styles.cartpathPath}>path</Text>
+          </Text>
+        </Pressable>
+      </View>
+
       <View style={styles.toggleRow}>
         <Toggle
           label="ANALOG"
@@ -355,46 +390,46 @@ export default function SpeedometerScreen() {
 
       <View style={styles.center}>
         {!trip.hasPermission ? (
-          <View style={styles.permission}>
-            <ActivityIndicator color={palette.forgeOrange} />
-            <Text style={styles.permissionText}>
-              Waiting for location permission…
-            </Text>
-            <Pressable style={styles.permissionBtn} onPress={trip.requestPermission}>
-              <Text style={styles.permissionBtnText}>Grant Access</Text>
-            </Pressable>
-          </View>
-        ) : mode === 'analog' ? (
-          <View style={[styles.dialStack, { width: dialSize, height: dialSize }]}>
-            <AnalogDial size={dialSize} speed={trip.speedMph} max={SPEED_MAX_MPH} />
-            <View
-              style={[
-                styles.compassInset,
-                {
-                  width: compassSize,
-                  height: compassSize,
-                  top: dialSize / 2 - compassSize / 2,
-                  left: dialSize / 2 - compassSize / 2,
-                },
-              ]}
-              pointerEvents="none"
-            >
-              <CompassRose size={compassSize} headingDeg={trip.headingDeg} />
+            <View style={styles.permission}>
+              <ActivityIndicator color={palette.forgeOrange} />
+              <Text style={styles.permissionText}>
+                Waiting for location permission…
+              </Text>
+              <Pressable style={styles.permissionBtn} onPress={trip.requestPermission}>
+                <Text style={styles.permissionBtnText}>Grant Access</Text>
+              </Pressable>
             </View>
-          </View>
-        ) : (
-          <View style={styles.digitalOuter}>
-            <View style={styles.digitalColumn}>
-              <DigitalReadout
-                speed={trip.speedMph}
-                containerWidth={digitalContainerWidth}
-                fontSizeMax={digitalFontMax}
-              />
-              <View style={{ height: spacing.lg }} />
-              <CompassRose size={compassSize} headingDeg={trip.headingDeg} />
+          ) : mode === 'analog' ? (
+            <View style={[styles.dialStack, { width: dialSize, height: dialSize }]}>
+              <AnalogDial size={dialSize} speed={trip.speedMph} max={SPEED_MAX_MPH} />
+              <View
+                style={[
+                  styles.compassInset,
+                  {
+                    width: compassSize,
+                    height: compassSize,
+                    top: dialSize / 2 - compassSize / 2,
+                    left: dialSize / 2 - compassSize / 2,
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <CompassRose size={compassSize} headingDeg={trip.headingDeg} />
+              </View>
             </View>
-          </View>
-        )}
+          ) : (
+            <View style={styles.digitalOuter}>
+              <View style={styles.digitalColumn}>
+                <DigitalReadout
+                  speed={trip.speedMph}
+                  containerWidth={digitalContainerWidth}
+                  fontSizeMax={digitalFontMax}
+                />
+                <View style={{ height: spacing.lg }} />
+                <CompassRose size={compassSize} headingDeg={trip.headingDeg} />
+              </View>
+            </View>
+          )}
       </View>
 
       <View style={styles.statsRow}>

@@ -6,7 +6,7 @@ forVEX styling: Forge Black background, Forge Orange accents, Rajdhani display t
 ## Features
 
 - **Analog / Digital toggle** — switch between a 0–25 mph dial with rotating compass rose and a big digital MPH readout
-- **Map tab** — live position dot with a forge-orange breadcrumb of the current trip
+- **Map tab** — course-up live map with breadcrumb trail, contextual daylight banner, and saved places (long-press to set)
 - **History tab** — past trips with date, distance, duration, max speed (long-press a row to delete)
 - **Auto trip-saving** — when you close or background the app, the current trip is saved to history and the trip resets when you reopen
 - **Screen stays awake** — `expo-keep-awake` is active on the Speedometer and Map tabs
@@ -69,7 +69,11 @@ golf-cart-speedo/
 ├── babel.config.js
 └── src/
     ├── theme.ts                     # forVEX color + type tokens
-    ├── db.ts                        # SQLite trip history
+    ├── db.ts                        # SQLite trips + checkpoint places
+    ├── hooks/
+    │   └── useDaylightMessage.ts    # Contextual MAP daylight banner
+    ├── data/
+    │   └── savedLoops.ts            # Favorite jaunt route shapes (code-edited)
     ├── context/
     │   └── TripContext.tsx          # Live GPS state, breadcrumb, auto-save on bg
     ├── components/
@@ -78,7 +82,7 @@ golf-cart-speedo/
     │   └── CompassRose.tsx          # Rotating compass with N/E/S/W
     ├── screens/
     │   ├── SpeedometerScreen.tsx    # Toggle + dial/digital + stats
-    │   ├── MapScreen.tsx            # Live position + breadcrumb
+    │   ├── MapScreen.tsx            # Course-up map, places, jaunts
     │   └── HistoryScreen.tsx        # Past trips list
     └── navigation/
         └── RootNavigator.tsx        # Bottom tabs with custom tab bar
@@ -103,7 +107,25 @@ every component reads from there.
 - **GPS smoothing**: 4-sample moving average; speeds < 0.5 mph snap to 0 to keep the needle still at idle
 - **Heading source**: GPS course-over-ground when moving > 1.5 mph, magnetometer (`watchHeadingAsync`) when stationary
 - **Trip lifecycle**: a trip starts on app launch, ends on `AppState` `background`/`inactive`, and is saved to SQLite if it covered ≥ 0.02 mi (~100 ft)
-- **Map**: native Apple Maps in dark mode (Android uses default light style — add a custom JSON if you ever run there)
+- **Map**: course-up Apple Maps (rotates with your heading while moving); pan/zoom freely — tap **CENTER** to resume GPS follow; ~20% closer default zoom than before
+- **Daylight banner**: time-of-day messages (sunrise/sunset windows, golden hour, lunch lap, headlights countdown) via SunCalc + local clock — see `src/hooks/useDaylightMessage.ts`
+- **Places**: four saved spots (Barn, Pool, Big Park, Amphitheatre) stored in SQLite; orange geofence circles log enter/exit while driving
+
+## Map tab — Places
+
+### Setting a place (in app)
+
+1. Open the **MAP** tab and wait for GPS.
+2. Tap a **PLACES** chip (Barn, Pool, Big Park, or Amphitheatre) to arm it — lat/lng appears below.
+3. **Long-press** the map where the place should be → confirm **Set**.
+4. The orange circle and pin move; coordinates persist across app restarts.
+
+On first launch, all four places start at `SAVED_LOOP_ORIGIN` in `savedLoops.ts` until you set them.
+
+### Map follow mode
+
+- The map auto-follows your cart by default (course-up while moving > 1.5 mph).
+- Drag the map to look around — follow pauses until you tap **CENTER**.
 
 ## Personalization Ideas
 

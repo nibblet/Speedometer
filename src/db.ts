@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { SAVED_LOOPS } from '@/data/savedLoops';
+import { SAVED_LOOP_ORIGIN } from '@/data/savedLoops';
 
 export type Trip = {
   id: number;
@@ -30,6 +30,13 @@ export type CheckpointEventRow = {
 };
 
 const DEFAULT_CHECKPOINT_RADIUS_M = 85;
+
+const DEFAULT_PLACES: { key: string; name: string }[] = [
+  { key: 'home', name: 'Barn' },
+  { key: 'kids_pool', name: 'Pool' },
+  { key: 'big_park', name: 'Big Park' },
+  { key: 'amphitheatre', name: 'Amphitheatre' },
+];
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -69,8 +76,8 @@ export function initDb(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_checkpoint_events_at ON checkpoint_events(at DESC);
   `);
-  seedCheckpointsFromSavedLoopsIfEmpty();
   migrateLegacyCheckpointKeys();
+  ensureDefaultCheckpoints();
 }
 
 /** Rename placeholder keys from earlier builds without wiping saved coordinates. */
@@ -90,16 +97,25 @@ function migrateLegacyCheckpointKeys(): void {
   }
 }
 
-function seedCheckpointsFromSavedLoopsIfEmpty(): void {
+/** Insert missing default places; preserve existing coordinates for known keys. */
+function ensureDefaultCheckpoints(): void {
   const database = getDb();
-  const row = database.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM checkpoints');
-  if (row != null && row.n > 0) return;
-  for (const loop of SAVED_LOOPS) {
-    const anchor = loop.coordinates[0];
+  for (const place of DEFAULT_PLACES) {
+    const existing = database.getFirstSync<{ key: string }>(
+      'SELECT key FROM checkpoints WHERE key = ?',
+      [place.key],
+    );
+    if (existing != null) continue;
     database.runSync(
       `INSERT INTO checkpoints (key, name, latitude, longitude, radius_meters)
        VALUES (?, ?, ?, ?, ?)`,
-      [loop.id, loop.name, anchor.latitude, anchor.longitude, DEFAULT_CHECKPOINT_RADIUS_M],
+      [
+        place.key,
+        place.name,
+        SAVED_LOOP_ORIGIN.latitude,
+        SAVED_LOOP_ORIGIN.longitude,
+        DEFAULT_CHECKPOINT_RADIUS_M,
+      ],
     );
   }
 }

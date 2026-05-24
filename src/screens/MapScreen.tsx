@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,20 +8,39 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
-import MapView, { Polyline, Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
-import Svg, { Circle as SvgCircle, Rect } from 'react-native-svg';
+import MapView, {
+  Polyline,
+  Marker,
+  Circle,
+  PROVIDER_DEFAULT,
+  type LongPressEvent,
+} from 'react-native-maps';
+import Svg, { Rect } from 'react-native-svg';
 import { fonts, palettes, spacing, radius, type ThemePalette } from '@/theme';
 import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
-import { SAVED_LOOPS, type SavedLoop } from '@/data/savedLoops';
-import { useSunsetMinutes } from '@/hooks/useSunsetMinutes';
+import { useDaylightMessage } from '@/hooks/useDaylightMessage';
+import { updateCheckpointCoordinates, type Checkpoint } from '@/db';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+const MAP_ZOOM_DELTA = 0.005 / 1.2;
+const GPS_HEADING_MIN_MPH = 1.5;
+
+const PLACE_ORDER = ['home', 'kids_pool', 'big_park', 'amphitheatre'] as const;
+
+const PLACE_LABELS: Record<(typeof PLACE_ORDER)[number], string> = {
+  home: 'Barn',
+  kids_pool: 'Pool',
+  big_park: 'Big Park',
+  amphitheatre: 'Amphitheatre',
+};
 
 function createMapStyles(palette: ThemePalette) {
   const isDay = palette === palettes.day;
@@ -77,6 +96,8 @@ function createMapStyles(palette: ThemePalette) {
       color: palette.bone,
       fontFamily: fonts.display,
       fontSize: 15,
+      flexShrink: 1,
+      textAlign: 'right',
     },
     stat: { flex: 1, alignItems: 'center' },
     statLabel: {
@@ -87,6 +108,33 @@ function createMapStyles(palette: ThemePalette) {
       marginBottom: 2,
     },
     statValue: { color: palette.white, fontFamily: fonts.display, fontSize: 16 },
+    centerChipRow: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.sm,
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+    },
+    centerChip: {
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      backgroundColor: overlayCardBg,
+    },
+    centerChipActive: {
+      borderColor: palette.forgeOrange,
+      backgroundColor: palette.forgeOrangeGlow,
+    },
+    centerChipText: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 2,
+    },
+    centerChipTextActive: {
+      color: palette.forgeOrange,
+    },
     cartMarker: {
       width: 40,
       height: 40,
@@ -96,6 +144,14 @@ function createMapStyles(palette: ThemePalette) {
       borderColor: palette.forgeOrange,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    placePin: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: palette.forgeOrange,
+      borderWidth: 2,
+      borderColor: palette.white,
     },
     loopBar: {
       position: 'absolute',
@@ -110,6 +166,21 @@ function createMapStyles(palette: ThemePalette) {
       letterSpacing: 3,
       marginBottom: spacing.xs,
       marginHorizontal: spacing.lg,
+    },
+    placeHint: {
+      color: palette.dim,
+      fontFamily: fonts.body,
+      fontSize: 11,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+    },
+    placeCoords: {
+      color: palette.bone,
+      fontFamily: fonts.body,
+      fontSize: 11,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+      letterSpacing: 0.5,
     },
     loopScroll: {
       paddingHorizontal: spacing.lg,
@@ -138,18 +209,22 @@ function createMapStyles(palette: ThemePalette) {
     loopChipTextSelected: {
       color: palette.forgeOrange,
     },
-    loopChipClear: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      justifyContent: 'center',
-    },
-    loopChipClearText: {
-      color: palette.dim,
-      fontFamily: fonts.bold,
-      fontSize: 12,
-      letterSpacing: 2,
-    },
   });
+}
+
+const PLACE_KEY_SET = new Set<string>(PLACE_ORDER);
+
+function sortPlaces(checkpoints: Checkpoint[]): Checkpoint[] {
+  const order = new Map(PLACE_ORDER.map((key, i) => [key, i]));
+  return [...checkpoints].sort((a, b) => {
+    const ai = order.get(a.key as (typeof PLACE_ORDER)[number]) ?? 99;
+    const bi = order.get(b.key as (typeof PLACE_ORDER)[number]) ?? 99;
+    return ai - bi;
+  });
+}
+
+function placeLabel(cp: Checkpoint): string {
+  return PLACE_LABELS[cp.key as (typeof PLACE_ORDER)[number]] ?? cp.name;
 }
 
 export default function MapScreen() {
@@ -158,86 +233,83 @@ export default function MapScreen() {
   const styles = useMemo(() => createMapStyles(palette), [palette]);
   const trip = useTrip();
   const mapRef = useRef<MapView | null>(null);
-  const [activeLoop, setActiveLoop] = useState<SavedLoop | null>(null);
-  const mergedFitDoneRef = useRef(false);
-  const prevLoopRef = useRef<SavedLoop | null>(null);
+  const [isFollowing, setIsFollowing] = useState(true);
+  const [armedPlaceKey, setArmedPlaceKey] = useState<string | null>(null);
+  const lastMovingHeadingRef = useRef(0);
 
-  const sunset = useSunsetMinutes(
+  const daylight = useDaylightMessage(
     trip.position?.latitude ?? null,
     trip.position?.longitude ?? null,
   );
 
-  const edgePad = { top: 200, right: 28, bottom: 200, left: 28 };
+  const sortedPlaces = useMemo(
+    () => sortPlaces(trip.checkpoints.filter((cp) => PLACE_KEY_SET.has(cp.key))),
+    [trip.checkpoints],
+  );
 
-  // Follow GPS unless a saved loop is active (then the map stays framed so you can see the planned route).
+  const armedPlace = armedPlaceKey
+    ? sortedPlaces.find((cp) => cp.key === armedPlaceKey) ?? null
+    : null;
+
+  const mapHeading =
+    trip.speedMph > GPS_HEADING_MIN_MPH ? trip.headingDeg : lastMovingHeadingRef.current;
+
   useEffect(() => {
-    if (activeLoop != null) return;
-    if (trip.position && mapRef.current) {
+    if (trip.speedMph > GPS_HEADING_MIN_MPH) {
+      lastMovingHeadingRef.current = trip.headingDeg;
+    }
+  }, [trip.speedMph, trip.headingDeg]);
+
+  const animateToCart = useCallback(
+    (duration = 600) => {
+      if (!trip.position || !mapRef.current) return;
       mapRef.current.animateCamera(
         {
           center: {
             latitude: trip.position.latitude,
             longitude: trip.position.longitude,
           },
+          heading: mapHeading,
+          pitch: 0,
         },
-        { duration: 600 },
+        { duration },
       );
-    }
-  }, [trip.position?.latitude, trip.position?.longitude, activeLoop]);
+    },
+    [trip.position, mapHeading],
+  );
 
   useEffect(() => {
-    mergedFitDoneRef.current = false;
-  }, [activeLoop?.id]);
+    if (!isFollowing) return;
+    animateToCart();
+  }, [trip.position?.latitude, trip.position?.longitude, isFollowing, animateToCart]);
 
-  useEffect(() => {
-    if (!activeLoop || !mapRef.current) return;
-    const id = setTimeout(() => {
-      mapRef.current?.fitToCoordinates(activeLoop.coordinates, {
-        edgePadding: edgePad,
-        animated: true,
-      });
-    }, 80);
-    return () => clearTimeout(id);
-  }, [activeLoop?.id]);
-
-  useEffect(() => {
-    if (!activeLoop || !trip.position || mergedFitDoneRef.current || !mapRef.current) return;
-    mergedFitDoneRef.current = true;
-    mapRef.current.fitToCoordinates([...activeLoop.coordinates, trip.position], {
-      edgePadding: edgePad,
-      animated: true,
-    });
-  }, [activeLoop, trip.position?.latitude, trip.position?.longitude]);
-
-  useEffect(() => {
-    const prev = prevLoopRef.current;
-    prevLoopRef.current = activeLoop;
-    if (prev != null && activeLoop == null && trip.position && mapRef.current) {
-      mapRef.current.animateCamera(
-        {
-          center: {
-            latitude: trip.position.latitude,
-            longitude: trip.position.longitude,
-          },
-        },
-        { duration: 500 },
-      );
-    }
-  }, [activeLoop, trip.position]);
-
-  const selectLoop = (loop: SavedLoop) => {
+  const togglePlace = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    if (activeLoop?.id === loop.id) {
-      setActiveLoop(null);
-      return;
-    }
-    trip.resetTrip();
-    setActiveLoop(loop);
+    setArmedPlaceKey((prev) => (prev === key ? null : key));
   };
 
-  const clearLoop = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setActiveLoop(null);
+  const handleMapLongPress = (event: LongPressEvent) => {
+    const { coordinate } = event.nativeEvent;
+    if (!armedPlace) {
+      Alert.alert('Select a place', 'Tap Barn, Pool, Big Park, or Amphitheatre first.');
+      return;
+    }
+    const label = placeLabel(armedPlace);
+    Alert.alert(
+      `Set ${label} here?`,
+      `${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Set',
+          onPress: () => {
+            updateCheckpointCoordinates(armedPlace.key, coordinate.latitude, coordinate.longitude);
+            trip.refreshCheckpoints();
+            setIsFollowing(false);
+          },
+        },
+      ],
+    );
   };
 
   if (!trip.hasPermission || !trip.position) {
@@ -265,31 +337,37 @@ export default function MapScreen() {
         showsMyLocationButton={false}
         showsBuildings={false}
         showsTraffic={false}
+        rotateEnabled
+        scrollEnabled
+        zoomEnabled
+        pitchEnabled={false}
+        onPanDrag={() => setIsFollowing(false)}
+        onLongPress={handleMapLongPress}
         initialRegion={{
           latitude: trip.position.latitude,
           longitude: trip.position.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
+          latitudeDelta: MAP_ZOOM_DELTA,
+          longitudeDelta: MAP_ZOOM_DELTA,
         }}
       >
         {trip.checkpoints.map((cp) => (
-          <Circle
-            key={cp.id}
-            center={{ latitude: cp.latitude, longitude: cp.longitude }}
-            radius={cp.radiusMeters}
-            strokeColor="rgba(255, 106, 26, 0.45)"
-            fillColor="rgba(255, 106, 26, 0.06)"
-            strokeWidth={1}
-          />
+          <React.Fragment key={cp.id}>
+            <Circle
+              center={{ latitude: cp.latitude, longitude: cp.longitude }}
+              radius={cp.radiusMeters}
+              strokeColor="rgba(255, 106, 26, 0.45)"
+              fillColor="rgba(255, 106, 26, 0.06)"
+              strokeWidth={1}
+            />
+            <Marker
+              coordinate={{ latitude: cp.latitude, longitude: cp.longitude }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              title={placeLabel(cp)}
+            >
+              <View style={styles.placePin} />
+            </Marker>
+          </React.Fragment>
         ))}
-        {activeLoop != null && activeLoop.coordinates.length > 1 && (
-          <Polyline
-            coordinates={activeLoop.coordinates}
-            strokeColor="rgba(255,255,255,0.35)"
-            strokeWidth={3}
-            lineDashPattern={[10, 8]}
-          />
-        )}
         {trip.breadcrumb.length > 1 && (
           <Polyline
             coordinates={trip.breadcrumb}
@@ -297,12 +375,7 @@ export default function MapScreen() {
             strokeWidth={4}
           />
         )}
-        <Marker
-          coordinate={trip.position}
-          anchor={{ x: 0.5, y: 0.5 }}
-          flat
-          rotation={trip.headingDeg}
-        >
+        <Marker coordinate={trip.position} anchor={{ x: 0.5, y: 0.5 }} flat rotation={0}>
           <View style={styles.cartMarker}>
             <CartIcon palette={palette} />
           </View>
@@ -311,46 +384,61 @@ export default function MapScreen() {
 
       <SafeAreaView edges={['top']} style={styles.overlayTop} pointerEvents="box-none">
         <View style={styles.overlayCard}>
-          <Stat label="PUTT-PUTT" value={`${Math.round(trip.speedMph)} mph`} styles={styles} />
-          <Stat label="JOYRIDE" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
-          <Stat label="TOP CRUISE" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
+          <Stat label="SPEED" value={`${Math.round(trip.speedMph)} mph`} styles={styles} />
+          <Stat label="DISTANCE" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
         </View>
         <View style={styles.sunsetRow}>
-          <Text style={styles.sunsetLabel}>DAYLIGHT</Text>
-          <Text style={styles.sunsetValue}>
-            {sunset.status === 'waiting' && '—'}
-            {sunset.status === 'until' && `${sunset.minutes} min 'til headlights`}
-            {sunset.status === 'dark' && 'Headlights on, partner'}
+          <Text style={styles.sunsetLabel}>
+            {daylight.status === 'ready' ? daylight.label : 'DAYLIGHT'}
           </Text>
+          <Text style={styles.sunsetValue}>
+            {daylight.status === 'waiting' ? '—' : daylight.message}
+          </Text>
+        </View>
+        <View style={styles.centerChipRow} pointerEvents="box-none">
+          <Pressable
+            onPress={() => {
+              setIsFollowing(true);
+              animateToCart(400);
+            }}
+            style={[styles.centerChip, isFollowing && styles.centerChipActive]}
+          >
+            <Text style={[styles.centerChipText, isFollowing && styles.centerChipTextActive]}>
+              CENTER
+            </Text>
+          </Pressable>
         </View>
       </SafeAreaView>
 
       <SafeAreaView edges={['bottom']} style={styles.loopBar} pointerEvents="box-none">
-        <Text style={styles.loopBarTitle}>FAVORITE JAUNTS</Text>
+        <Text style={styles.loopBarTitle}>PLACES</Text>
+        {armedPlace != null && (
+          <>
+            <Text style={styles.placeHint}>Long-press map to set</Text>
+            <Text style={styles.placeCoords}>
+              {armedPlace.latitude.toFixed(6)}, {armedPlace.longitude.toFixed(6)}
+            </Text>
+          </>
+        )}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.loopScroll}
         >
-          {SAVED_LOOPS.map((loop) => {
-            const selected = activeLoop?.id === loop.id;
+          {sortedPlaces.map((cp) => {
+            const selected = armedPlaceKey === cp.key;
             return (
               <Pressable
-                key={loop.id}
-                onPress={() => selectLoop(loop)}
+                key={cp.key}
+                onPress={() => togglePlace(cp.key)}
                 style={[styles.loopChip, selected && styles.loopChipSelected]}
               >
                 <Text style={[styles.loopChipText, selected && styles.loopChipTextSelected]}>
-                  {loop.name}
+                  {placeLabel(cp)}
                 </Text>
               </Pressable>
             );
           })}
-          {activeLoop != null && (
-            <Pressable onPress={clearLoop} style={styles.loopChipClear}>
-              <Text style={styles.loopChipClearText}>PARK IT</Text>
-            </Pressable>
-          )}
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -379,19 +467,14 @@ function CartIcon({ palette }: { palette: ThemePalette }) {
   const tire = palette.forgeBlack;
   const trim = palette.forgeOrangeDim;
   const windshield = palette.bone;
-  // Top-down view; "forward" is +Y up. Marker rotation aligns this with heading.
   return (
     <Svg width={22} height={28} viewBox="0 0 28 36">
-      {/* wheels (front + rear, just outside body) */}
       <Rect x={2} y={6} width={3} height={5} rx={1} fill={tire} />
       <Rect x={23} y={6} width={3} height={5} rx={1} fill={tire} />
       <Rect x={2} y={25} width={3} height={5} rx={1} fill={tire} />
       <Rect x={23} y={25} width={3} height={5} rx={1} fill={tire} />
-      {/* canopy / body seen from above */}
       <Rect x={5} y={3} width={18} height={30} rx={4} fill={roof} stroke={trim} strokeWidth={1} />
-      {/* windshield strip near the front */}
       <Rect x={7} y={5} width={14} height={4} rx={1.5} fill={windshield} opacity={0.85} />
-      {/* tiny seat divider so it reads as a cart, not a brick */}
       <Rect x={7} y={18} width={14} height={1.5} rx={0.5} fill={trim} opacity={0.5} />
     </Svg>
   );
