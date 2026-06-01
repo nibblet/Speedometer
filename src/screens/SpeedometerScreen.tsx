@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
 import { fonts, radius, spacing, SPEED_MAX_MPH, type ThemePalette } from '@/theme';
 import { useTrip } from '@/context/TripContext';
+import { useBattery } from '@/context/BatteryContext';
 import { useAppearance, type AppearanceMode } from '@/context/AppearanceContext';
 import { AnalogDial } from '@/components/AnalogDial';
 import { CompassRose } from '@/components/CompassRose';
@@ -265,6 +266,7 @@ export default function SpeedometerScreen() {
   const digitalFontMax = Math.min(digitalContainerWidth * 0.44, 200);
 
   const trip = useTrip();
+  const battery = useBattery();
   const {
     mode: appearanceMode,
     setMode: setAppearanceMode,
@@ -282,6 +284,21 @@ export default function SpeedometerScreen() {
       trip.requestPermission();
     }
   }, [trip.hasPermission, trip.requestPermission]);
+
+  // Start scanning for the RL-BI025 battery monitor when BLE is available.
+  useEffect(() => {
+    if (battery.available) {
+      battery.start();
+      return () => battery.stop();
+    }
+  }, [battery.available]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const batteryValue = (() => {
+    if (battery.percent != null) return `${Math.round(battery.percent)}%`;
+    if (battery.voltageV != null) return `${battery.voltageV.toFixed(1)}V`;
+    if (battery.available) return battery.scanning ? '···' : '--';
+    return '--';
+  })();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -435,6 +452,7 @@ export default function SpeedometerScreen() {
       <View style={styles.statsRow}>
         <Stat label="TRIP" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
         <Stat label="MAX" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
+        <Stat label="BATTERY" value={batteryValue} styles={styles} />
         <Stat label="HEADING" value={bearingLabel(trip.headingDeg)} styles={styles} />
       </View>
     </SafeAreaView>
