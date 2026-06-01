@@ -25,13 +25,26 @@ import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
 import { useDaylightMessage } from '@/hooks/useDaylightMessage';
 import { updateCheckpointCoordinates, type Checkpoint } from '@/db';
+import { SAVED_LOOP_ORIGIN } from '@/data/savedLoops';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const MAP_ZOOM_DELTA = 0.005 / 1.2;
+const MAP_ZOOM_DELTA = 0.0022;
 const GPS_HEADING_MIN_MPH = 1.5;
+
+/**
+ * Checkpoints seed at SAVED_LOOP_ORIGIN until the user long-presses to place
+ * them. An unplaced checkpoint still sits on the seed coordinate, so we treat
+ * "near the origin" as unset and skip drawing it (otherwise every place stacks
+ * on one far-away point and clutters the map).
+ */
+function isPlaced(cp: Checkpoint): boolean {
+  const dLat = Math.abs(cp.latitude - SAVED_LOOP_ORIGIN.latitude);
+  const dLng = Math.abs(cp.longitude - SAVED_LOOP_ORIGIN.longitude);
+  return dLat > 1e-5 || dLng > 1e-5;
+}
 
 const PLACE_ORDER = ['home', 'kids_pool', 'big_park', 'amphitheatre'] as const;
 
@@ -108,6 +121,13 @@ function createMapStyles(palette: ThemePalette) {
       marginBottom: 2,
     },
     statValue: { color: palette.white, fontFamily: fonts.display, fontSize: 16 },
+    statValueBig: {
+      color: palette.white,
+      fontFamily: fonts.display,
+      fontSize: 48,
+      lineHeight: 52,
+      letterSpacing: 1,
+    },
     centerChipRow: {
       marginHorizontal: spacing.lg,
       marginTop: spacing.sm,
@@ -145,6 +165,19 @@ function createMapStyles(palette: ThemePalette) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    placePinWrap: { alignItems: 'center' },
+    placePinLabel: {
+      color: palette.white,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 1,
+      marginBottom: 2,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+      backgroundColor: isDay ? 'rgba(10,10,10,0.78)' : 'rgba(0,0,0,0.7)',
+      overflow: 'hidden',
+    },
     placePin: {
       width: 14,
       height: 14,
@@ -153,6 +186,15 @@ function createMapStyles(palette: ThemePalette) {
       borderWidth: 2,
       borderColor: palette.white,
     },
+    chipDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: 6,
+      borderWidth: 1.5,
+      borderColor: palette.forgeOrange,
+    },
+    chipDotPlaced: { backgroundColor: palette.forgeOrange },
     loopBar: {
       position: 'absolute',
       bottom: 0,
@@ -189,6 +231,8 @@ function createMapStyles(palette: ThemePalette) {
       alignItems: 'center',
     },
     loopChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       borderRadius: radius.pill,
@@ -350,7 +394,7 @@ export default function MapScreen() {
           longitudeDelta: MAP_ZOOM_DELTA,
         }}
       >
-        {trip.checkpoints.map((cp) => (
+        {trip.checkpoints.filter(isPlaced).map((cp) => (
           <React.Fragment key={cp.id}>
             <Circle
               center={{ latitude: cp.latitude, longitude: cp.longitude }}
@@ -361,10 +405,13 @@ export default function MapScreen() {
             />
             <Marker
               coordinate={{ latitude: cp.latitude, longitude: cp.longitude }}
-              anchor={{ x: 0.5, y: 0.5 }}
+              anchor={{ x: 0.5, y: 1 }}
               title={placeLabel(cp)}
             >
-              <View style={styles.placePin} />
+              <View style={styles.placePinWrap}>
+                <Text style={styles.placePinLabel}>{placeLabel(cp)}</Text>
+                <View style={styles.placePin} />
+              </View>
             </Marker>
           </React.Fragment>
         ))}
@@ -384,7 +431,13 @@ export default function MapScreen() {
 
       <SafeAreaView edges={['top']} style={styles.overlayTop} pointerEvents="box-none">
         <View style={styles.overlayCard}>
-          <Stat label="SPEED" value={`${Math.round(trip.speedMph)} mph`} styles={styles} />
+          <Stat
+            label="SPEED"
+            value={`${Math.round(trip.speedMph)}`}
+            unit="mph"
+            big
+            styles={styles}
+          />
           <Stat label="DISTANCE" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
         </View>
         <View style={styles.sunsetRow}>
@@ -427,12 +480,14 @@ export default function MapScreen() {
         >
           {sortedPlaces.map((cp) => {
             const selected = armedPlaceKey === cp.key;
+            const placed = isPlaced(cp);
             return (
               <Pressable
                 key={cp.key}
                 onPress={() => togglePlace(cp.key)}
                 style={[styles.loopChip, selected && styles.loopChipSelected]}
               >
+                <View style={[styles.chipDot, placed && styles.chipDotPlaced]} />
                 <Text style={[styles.loopChipText, selected && styles.loopChipTextSelected]}>
                   {placeLabel(cp)}
                 </Text>
@@ -448,16 +503,23 @@ export default function MapScreen() {
 function Stat({
   label,
   value,
+  unit,
+  big,
   styles,
 }: {
   label: string;
   value: string;
+  unit?: string;
+  big?: boolean;
   styles: ReturnType<typeof createMapStyles>;
 }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>
+        {label}
+        {unit ? ` · ${unit.toUpperCase()}` : ''}
+      </Text>
+      <Text style={big ? styles.statValueBig : styles.statValue}>{value}</Text>
     </View>
   );
 }

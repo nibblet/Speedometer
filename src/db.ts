@@ -1,5 +1,4 @@
 import * as SQLite from 'expo-sqlite';
-import { SAVED_LOOP_ORIGIN } from '@/data/savedLoops';
 
 export type Trip = {
   id: number;
@@ -31,11 +30,19 @@ export type CheckpointEventRow = {
 
 const DEFAULT_CHECKPOINT_RADIUS_M = 85;
 
-const DEFAULT_PLACES: { key: string; name: string }[] = [
-  { key: 'home', name: 'Barn' },
-  { key: 'kids_pool', name: 'Pool' },
-  { key: 'big_park', name: 'Big Park' },
-  { key: 'amphitheatre', name: 'Amphitheatre' },
+/** Placeholder origin used by earlier builds — pins seeded here are "unplaced". */
+const LEGACY_SEED_ORIGIN = { latitude: 33.502, longitude: -117.063 };
+
+const DEFAULT_PLACES: {
+  key: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}[] = [
+  { key: 'home', name: 'Barn', latitude: 38.32412971676258, longitude: -85.56328839802686 },
+  { key: 'kids_pool', name: 'Pool', latitude: 38.33197678197266, longitude: -85.57328078544803 },
+  { key: 'big_park', name: 'Big Park', latitude: 38.331669395493265, longitude: -85.57135393835345 },
+  { key: 'amphitheatre', name: 'Amphitheatre', latitude: 38.32931018931509, longitude: -85.56877609942313 },
 ];
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -78,6 +85,7 @@ export function initDb(): void {
   `);
   migrateLegacyCheckpointKeys();
   ensureDefaultCheckpoints();
+  relocateLegacyDefaultCheckpoints();
 }
 
 /** Rename placeholder keys from earlier builds without wiping saved coordinates. */
@@ -97,7 +105,7 @@ function migrateLegacyCheckpointKeys(): void {
   }
 }
 
-/** Insert missing default places; preserve existing coordinates for known keys. */
+/** Insert missing default places at their real coordinates; preserve existing. */
 function ensureDefaultCheckpoints(): void {
   const database = getDb();
   for (const place of DEFAULT_PLACES) {
@@ -109,12 +117,31 @@ function ensureDefaultCheckpoints(): void {
     database.runSync(
       `INSERT INTO checkpoints (key, name, latitude, longitude, radius_meters)
        VALUES (?, ?, ?, ?, ?)`,
+      [place.key, place.name, place.latitude, place.longitude, DEFAULT_CHECKPOINT_RADIUS_M],
+    );
+  }
+}
+
+/**
+ * Earlier builds seeded every place at a placeholder origin, so all pins stacked
+ * on one far-away point. Move any checkpoint still sitting on that origin to its
+ * real coordinate. Idempotent: only rows still at the legacy origin are touched,
+ * so user-placed pins are never overwritten.
+ */
+function relocateLegacyDefaultCheckpoints(): void {
+  const database = getDb();
+  for (const place of DEFAULT_PLACES) {
+    database.runSync(
+      `UPDATE checkpoints SET latitude = ?, longitude = ?
+         WHERE key = ?
+           AND ABS(latitude - ?) < 1e-4
+           AND ABS(longitude - ?) < 1e-4`,
       [
+        place.latitude,
+        place.longitude,
         place.key,
-        place.name,
-        SAVED_LOOP_ORIGIN.latitude,
-        SAVED_LOOP_ORIGIN.longitude,
-        DEFAULT_CHECKPOINT_RADIUS_M,
+        LEGACY_SEED_ORIGIN.latitude,
+        LEGACY_SEED_ORIGIN.longitude,
       ],
     );
   }

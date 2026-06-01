@@ -27,16 +27,6 @@ const LOGO_HEIGHT = 45;
 const LOGO_DAY_ASPECT = 847 / 501;
 const LOGO_NIGHT_ASPECT = 847 / 581;
 
-function bearingLabel(deg: number): string {
-  if (!Number.isFinite(deg)) return '---';
-  const n = ((deg % 360) + 360) % 360;
-  const rounded = Math.round(n) % 360;
-  const display = rounded === 360 ? 0 : rounded;
-  const cardinals = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const idx = Math.round(display / 45) % 8;
-  return `${display.toString().padStart(3, '0')}° ${cardinals[idx]}`;
-}
-
 const APPEARANCE_LABELS: Record<AppearanceMode, string> = {
   auto: 'AUTO (SUN)',
   day: 'DAY',
@@ -467,7 +457,6 @@ export default function SpeedometerScreen() {
               : undefined
           }
         />
-        <Stat label="HEADING" value={bearingLabel(trip.headingDeg)} styles={styles} />
       </View>
     </SafeAreaView>
   );
