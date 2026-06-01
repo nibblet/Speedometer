@@ -28,7 +28,8 @@ export type CheckpointEventRow = {
   at: number;
 };
 
-const DEFAULT_CHECKPOINT_RADIUS_M = 85;
+const DEFAULT_CHECKPOINT_RADIUS_M = 40;
+const LEGACY_CHECKPOINT_RADIUS_M = 85;
 
 /** Placeholder origin used by earlier builds — pins seeded here are "unplaced". */
 const LEGACY_SEED_ORIGIN = { latitude: 33.502, longitude: -117.063 };
@@ -86,6 +87,16 @@ export function initDb(): void {
   migrateLegacyCheckpointKeys();
   ensureDefaultCheckpoints();
   relocateLegacyDefaultCheckpoints();
+  shrinkLegacyCheckpointRadius();
+}
+
+/** Shrink default geofence rings from the old 85 m to 40 m (skips custom radii). */
+function shrinkLegacyCheckpointRadius(): void {
+  const database = getDb();
+  database.runSync(`UPDATE checkpoints SET radius_meters = ? WHERE radius_meters = ?`, [
+    DEFAULT_CHECKPOINT_RADIUS_M,
+    LEGACY_CHECKPOINT_RADIUS_M,
+  ]);
 }
 
 /** Rename placeholder keys from earlier builds without wiping saved coordinates. */

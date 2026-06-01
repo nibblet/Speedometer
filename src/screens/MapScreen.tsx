@@ -19,10 +19,11 @@ import MapView, {
   PROVIDER_DEFAULT,
   type LongPressEvent,
 } from 'react-native-maps';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { Rect, Path } from 'react-native-svg';
 import { fonts, palettes, spacing, radius, type ThemePalette } from '@/theme';
 import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
+import { useBattery } from '@/context/BatteryContext';
 import { useDaylightMessage } from '@/hooks/useDaylightMessage';
 import { updateCheckpointCoordinates, type Checkpoint } from '@/db';
 import { SAVED_LOOP_ORIGIN } from '@/data/savedLoops';
@@ -44,6 +45,41 @@ function isPlaced(cp: Checkpoint): boolean {
   const dLat = Math.abs(cp.latitude - SAVED_LOOP_ORIGIN.latitude);
   const dLng = Math.abs(cp.longitude - SAVED_LOOP_ORIGIN.longitude);
   return dLat > 1e-5 || dLng > 1e-5;
+}
+
+type LatLng = { latitude: number; longitude: number };
+
+function haversineMeters(a: LatLng, b: LatLng): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+/** True bearing (0-360) from `a` to `b`. */
+function bearingDeg(a: LatLng, b: LatLng): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function formatDistance(meters: number): string {
+  const ft = meters * 3.28084;
+  if (ft < 1000) return `${Math.round(ft)} ft`;
+  return `${(meters / 1609.344).toFixed(2)} mi`;
 }
 
 const PLACE_ORDER = ['home', 'kids_pool', 'big_park', 'amphitheatre'] as const;
@@ -127,6 +163,31 @@ function createMapStyles(palette: ThemePalette) {
       fontSize: 48,
       lineHeight: 52,
       letterSpacing: 1,
+    },
+    overlayRightCol: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+      gap: spacing.sm,
+    },
+    miniStat: { alignItems: 'flex-end' },
+    miniValue: {
+      color: palette.white,
+      fontFamily: fonts.display,
+      fontSize: 18,
+    },
+    directionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+    },
+    directionText: {
+      color: palette.bone,
+      fontFamily: fonts.display,
+      fontSize: 16,
+      letterSpacing: 0.5,
     },
     centerChipRow: {
       marginHorizontal: spacing.lg,
@@ -276,6 +337,7 @@ export default function MapScreen() {
   const { palette, resolved } = useAppearance();
   const styles = useMemo(() => createMapStyles(palette), [palette]);
   const trip = useTrip();
+  const battery = useBattery();
   const mapRef = useRef<MapView | null>(null);
   const [isFollowing, setIsFollowing] = useState(true);
   const [armedPlaceKey, setArmedPlaceKey] = useState<string | null>(null);
@@ -297,6 +359,22 @@ export default function MapScreen() {
 
   const mapHeading =
     trip.speedMph > GPS_HEADING_MIN_MPH ? trip.headingDeg : lastMovingHeadingRef.current;
+
+  // Distance + heading-relative bearing from the cart to the selected place.
+  const targetInfo = useMemo(() => {
+    if (!armedPlace || !isPlaced(armedPlace) || !trip.position) return null;
+    const to = { latitude: armedPlace.latitude, longitude: armedPlace.longitude };
+    const meters = haversineMeters(trip.position, to);
+    const relative = ((bearingDeg(trip.position, to) - mapHeading) % 360 + 360) % 360;
+    return { meters, relative };
+  }, [armedPlace, trip.position, mapHeading]);
+
+  const chargeValue =
+    battery.percent != null
+      ? `${Math.round(battery.percent)}%`
+      : battery.available && battery.scanning
+        ? '···'
+        : '--';
 
   useEffect(() => {
     if (trip.speedMph > GPS_HEADING_MIN_MPH) {
@@ -438,7 +516,16 @@ export default function MapScreen() {
             big
             styles={styles}
           />
-          <Stat label="DISTANCE" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
+          <View style={styles.overlayRightCol}>
+            <View style={styles.miniStat}>
+              <Text style={styles.statLabel}>DISTANCE</Text>
+              <Text style={styles.miniValue}>{trip.distanceMiles.toFixed(2)} mi</Text>
+            </View>
+            <View style={styles.miniStat}>
+              <Text style={styles.statLabel}>CHARGE</Text>
+              <Text style={styles.miniValue}>{chargeValue}</Text>
+            </View>
+          </View>
         </View>
         <View style={styles.sunsetRow}>
           <Text style={styles.sunsetLabel}>
@@ -465,14 +552,25 @@ export default function MapScreen() {
 
       <SafeAreaView edges={['bottom']} style={styles.loopBar} pointerEvents="box-none">
         <Text style={styles.loopBarTitle}>PLACES</Text>
-        {armedPlace != null && (
-          <>
-            <Text style={styles.placeHint}>Long-press map to set</Text>
-            <Text style={styles.placeCoords}>
-              {armedPlace.latitude.toFixed(6)}, {armedPlace.longitude.toFixed(6)}
-            </Text>
-          </>
-        )}
+        {armedPlace != null &&
+          (targetInfo ? (
+            <>
+              <View style={styles.directionRow}>
+                <DirectionArrow deg={targetInfo.relative} color={palette.forgeOrange} />
+                <Text style={styles.directionText}>
+                  {placeLabel(armedPlace)} · {formatDistance(targetInfo.meters)}
+                </Text>
+              </View>
+              <Text style={styles.placeHint}>Long-press map to move this pin</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.placeHint}>Long-press map to set</Text>
+              <Text style={styles.placeCoords}>
+                {armedPlace.latitude.toFixed(6)}, {armedPlace.longitude.toFixed(6)}
+              </Text>
+            </>
+          ))}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -521,6 +619,20 @@ function Stat({
       </Text>
       <Text style={big ? styles.statValueBig : styles.statValue}>{value}</Text>
     </View>
+  );
+}
+
+/** Triangle arrow pointing `deg` clockwise from straight up (0 = ahead). */
+function DirectionArrow({ deg, color }: { deg: number; color: string }) {
+  return (
+    <Svg
+      width={30}
+      height={30}
+      viewBox="0 0 24 24"
+      style={{ transform: [{ rotate: `${deg}deg` }] }}
+    >
+      <Path d="M12 2 L20 21 L12 16.5 L4 21 Z" fill={color} />
+    </Svg>
   );
 }
 
