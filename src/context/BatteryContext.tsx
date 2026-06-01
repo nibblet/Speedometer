@@ -141,11 +141,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
             .join(' '),
         );
       }
-      if (!macKeyRef.current) return;
-      const reading: BatteryReading | null = decodeNotification(
-        bytes,
-        macKeyRef.current,
-      );
+      const reading: BatteryReading | null = decodeNotification(bytes);
       if (__DEV__) console.log('[BLE] decoded', reading);
       if (reading) {
         patch({

@@ -13,23 +13,15 @@
  *   - checksum = (sum of bytes[1 .. len+2]) & 0xFF  (everything between
  *     header and checksum, inclusive of cid + len + payload)
  *
- * Payload encryption is a symmetric byte XOR (NOT TEA, despite the SDK name
- * `mcuEncrypt`):
- *   plain[i] = enc[i] ^ macKey[i % 6] ^ cid[i & 1]
- *   - cid bytes are each forced to >= 1 (a 0 byte becomes 1)
- *   - macKey = the device's 6-byte MAC. On iOS the MAC is not exposed by
- *     CoreBluetooth, so we take it from the advertisement manufacturer data
- *     (the trailing 6 bytes); on Android the platform MAC reversed yields the
- *     same 6 bytes.
+ * Payload is sent in the clear on this firmware (no encryption — the SDK's
+ * `mcuEncrypt` is a no-op/disabled here, confirmed against the live device).
  *
  * Decoded payload semantics (subset we use):
  *   plain[0]=2, plain[1]=3, plain[2]=1  -> realtime voltage:
- *     voltage(V)   = ((plain[4] << 8) | plain[3]) / 100
- *     batteryPct   = plain[7]
+ *     voltage(V) = ((plain[4] << 8) | plain[3]) / 100
  *
- * All constants were extracted from libAILinkBle-lib.so and the
- * moduleruilite parser, and verified against a real device capture
- * (56.25 V / 100 %, MAC bytes 77 AE 04 FE B9 01).
+ * Verified against a live device capture: payload `02 03 01 3d 14 3f 14 0b`
+ * -> 0x143d / 100 = 51.81 V (checksum 0xdc OK).
  */
 
 export const RUNLEADER_SERVICE_UUID = '0000FFE0-0000-1000-8000-00805F9B34FB';
@@ -44,8 +36,8 @@ const MCU_FOOTER = 0x7a;
 export type BatteryReading = {
   /** Pack voltage in volts (e.g. 56.25). */
   voltageV: number;
-  /** State of charge 0-100, as reported by the monitor. */
-  percent: number;
+  /** State of charge 0-100; null until we map the percent frame. */
+  percent: number | null;
 };
 
 /** Derive the 6-byte XOR key from advertisement manufacturer data. */
@@ -59,21 +51,7 @@ export function macKeyFromManufacturerData(
   return bytes.slice(bytes.length - 6);
 }
 
-/** Symmetric XOR transform used by the AiLink "mcuEncrypt" native call. */
-export function xorCrypt(
-  data: number[],
-  macKey: number[],
-  cidBytes: [number, number],
-): number[] {
-  const cid: [number, number] = [cidBytes[0] || 1, cidBytes[1] || 1];
-  const out = new Array<number>(data.length);
-  for (let i = 0; i < data.length; i++) {
-    out[i] = (data[i] ^ macKey[i % 6] ^ cid[i & 1]) & 0xff;
-  }
-  return out;
-}
-
-/** Validate an MCU frame and return its cid + (still encrypted) payload. */
+/** Validate an MCU frame and return its cid + payload. */
 export function parseFrame(
   frame: number[],
 ): { cid: [number, number]; payload: number[] } | null {
@@ -97,31 +75,28 @@ export function parseFrame(
   };
 }
 
-/** Parse a decrypted payload into a battery reading, if it is a voltage frame. */
+/** Parse a payload into a battery reading, if it is a voltage frame. */
 export function parsePayload(plain: number[]): BatteryReading | null {
   // group 2 = realtime; subtype 3 = voltage; mode 1 = current value
-  if (plain.length >= 8 && plain[0] === 2 && plain[1] === 3 && plain[2] === 1) {
+  if (plain.length >= 5 && plain[0] === 2 && plain[1] === 3 && plain[2] === 1) {
     const raw = ((plain[4] << 8) | plain[3]) >>> 0;
     return {
       voltageV: raw / 100,
-      percent: plain[7],
+      percent: null,
     };
   }
   return null;
 }
 
 /**
- * Decode one FFE2 notification into a battery reading.
- * Returns null for non-voltage frames (speed/rpm/odo/etc.) or invalid frames.
+ * Decode one FFE2 notification into a battery reading. The device streams
+ * plaintext frames, so we validate and parse directly.
+ * Returns null for non-voltage frames (info/version/etc.) or invalid frames.
  */
-export function decodeNotification(
-  frame: number[],
-  macKey: number[],
-): BatteryReading | null {
+export function decodeNotification(frame: number[]): BatteryReading | null {
   const parsed = parseFrame(frame);
   if (!parsed) return null;
-  const plain = xorCrypt(parsed.payload, macKey, parsed.cid);
-  return parsePayload(plain);
+  return parsePayload(parsed.payload);
 }
 
 /** Decode a base64 characteristic value (as delivered by react-native-ble-plx). */
