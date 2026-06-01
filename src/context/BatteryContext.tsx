@@ -104,6 +104,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
   const wantConnectedRef = useRef(false);
   const monitorSubRef = useRef<any | null>(null);
   const disconnectSubRef = useRef<any | null>(null);
+  const stateSubRef = useRef<any | null>(null);
 
   const patch = useCallback((p: Partial<BatteryState>) => {
     setState((prev) => ({ ...prev, ...p }));
@@ -116,6 +117,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
     patch({ available: mgr != null });
     return () => {
       try {
+        stateSubRef.current?.remove();
         monitorSubRef.current?.remove();
         disconnectSubRef.current?.remove();
         mgr?.destroy();
@@ -226,14 +228,29 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
   }, [patch, connect]);
 
   const start = useCallback(async () => {
-    if (!managerRef.current) return;
+    const mgr = managerRef.current;
+    if (!mgr) return;
     wantConnectedRef.current = true;
     const ok = await ensureAndroidPermissions();
     if (!ok) {
       patch({ error: 'Bluetooth permission denied' });
       return;
     }
-    scan();
+    // iOS rejects a scan issued before the adapter reports PoweredOn, which also
+    // means the system Bluetooth permission prompt never fires. Subscribe to
+    // state changes (emitCurrentState=true) — this triggers the prompt and lets
+    // us scan only once the adapter is actually ready.
+    stateSubRef.current?.remove();
+    stateSubRef.current = mgr.onStateChange((s: string) => {
+      if (!wantConnectedRef.current) return;
+      if (s === 'PoweredOn') {
+        scan();
+      } else if (s === 'PoweredOff') {
+        patch({ scanning: false, connected: false, error: 'Bluetooth is off' });
+      } else if (s === 'Unauthorized') {
+        patch({ scanning: false, error: 'Bluetooth permission denied' });
+      }
+    }, true);
   }, [patch, scan]);
 
   const stop = useCallback(() => {
@@ -241,6 +258,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
     const mgr = managerRef.current;
     try {
       mgr?.stopDeviceScan();
+      stateSubRef.current?.remove();
       monitorSubRef.current?.remove();
       disconnectSubRef.current?.remove();
       deviceRef.current?.cancelConnection();
