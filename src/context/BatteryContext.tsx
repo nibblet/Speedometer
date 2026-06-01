@@ -129,11 +129,24 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
 
   const handleNotification = useCallback(
     (valueB64: string | null | undefined) => {
-      if (!valueB64 || !macKeyRef.current) return;
+      if (!valueB64) return;
+      const bytes = bytesFromBase64(valueB64);
+      if (__DEV__) {
+        console.log(
+          '[BLE] notify',
+          bytes.map((b) => b.toString(16).padStart(2, '0')).join(' '),
+          'macKey',
+          macKeyRef.current
+            ?.map((b) => b.toString(16).padStart(2, '0'))
+            .join(' '),
+        );
+      }
+      if (!macKeyRef.current) return;
       const reading: BatteryReading | null = decodeNotification(
-        bytesFromBase64(valueB64),
+        bytes,
         macKeyRef.current,
       );
+      if (__DEV__) console.log('[BLE] decoded', reading);
       if (reading) {
         patch({
           voltageV: reading.voltageV,
@@ -153,7 +166,10 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
         RUNLEADER_SERVICE_UUID,
         RUNLEADER_NOTIFY_UUID,
         (err: any, characteristic: any) => {
-          if (err) return; // disconnect handler deals with teardown
+          if (err) {
+            if (__DEV__) console.log('[BLE] monitor error', err?.message ?? err);
+            return; // disconnect handler deals with teardown
+          }
           handleNotification(characteristic?.value);
         },
       );
@@ -183,13 +199,26 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
             .reverse();
         }
         macKeyRef.current = macKey;
+        if (__DEV__) {
+          console.log(
+            '[BLE] connecting to',
+            scanned.id,
+            scanned.name ?? scanned.localName,
+            'mfg',
+            scanned.manufacturerData,
+            'macKey',
+            macKey?.map((b: number) => b.toString(16)).join(' ') ?? 'NONE',
+          );
+        }
 
         const device = await scanned.connect();
         await device.discoverAllServicesAndCharacteristics();
         deviceRef.current = device;
+        if (__DEV__) console.log('[BLE] connected + discovered');
 
         disconnectSubRef.current?.remove();
-        disconnectSubRef.current = device.onDisconnected(() => {
+        disconnectSubRef.current = device.onDisconnected((err: any) => {
+          if (__DEV__) console.log('[BLE] disconnected', err?.message ?? 'ok');
           patch({ connected: false });
           deviceRef.current = null;
           if (wantConnectedRef.current) scan(); // auto-reconnect
@@ -198,6 +227,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
         subscribe(device);
         patch({ connected: true, error: null });
       } catch (e: any) {
+        if (__DEV__) console.log('[BLE] connect error', e?.message ?? e);
         patch({ connected: false, error: e?.message ?? 'connect failed' });
         if (wantConnectedRef.current) setTimeout(() => scan(), 2000);
       }
