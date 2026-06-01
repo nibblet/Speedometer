@@ -13,6 +13,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { TripProvider } from '@/context/TripContext';
+import { BatteryProvider } from '@/context/BatteryContext';
 import { AppearanceProvider, useAppearance } from '@/context/AppearanceContext';
 import { initDb } from '@/db';
 import { colors } from '@/theme';
@@ -56,10 +57,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <TripProvider>
-        <AppearanceProvider>
-          <ThemedStatusBar />
-          <RootNavigator />
-        </AppearanceProvider>
+        <BatteryProvider>
+          <AppearanceProvider>
+            <ThemedStatusBar />
+            <RootNavigator />
+          </AppearanceProvider>
+        </BatteryProvider>
       </TripProvider>
     </SafeAreaProvider>
   );

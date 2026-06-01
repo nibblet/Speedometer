@@ -19,7 +19,9 @@
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Used to display your speed, heading, and trip distance on the speedometer."
+        "NSLocationWhenInUseUsageDescription": "Used to display your speed, heading, and trip distance on the speedometer.",
+        "NSBluetoothAlwaysUsageDescription": "Used to read your cart's battery voltage and charge level from the Runleader battery monitor.",
+        "NSBluetoothPeripheralUsageDescription": "Used to read your cart's battery voltage and charge level from the Runleader battery monitor."
       }
     },
     "android": {
@@ -30,7 +32,9 @@
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT"
       ]
     },
     "plugins": [
@@ -38,6 +42,14 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "Used to display your speed, heading, and trip distance."
+        }
+      ],
+      [
+        "@config-plugins/react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": ["central"],
+          "bluetoothAlwaysPermission": "Used to read your cart's battery voltage and charge level from the Runleader battery monitor."
         }
       ],
       "expo-asset"
