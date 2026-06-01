@@ -34,6 +34,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MAP_ZOOM_DELTA = 0.0022;
 const GPS_HEADING_MIN_MPH = 1.5;
+/** Above this speed the 3D tilt auto-flattens to top-down for clarity. */
+const AUTOFLATTEN_MPH = 15;
 
 /**
  * Checkpoints seed at SAVED_LOOP_ORIGIN until the user long-presses to place
@@ -85,7 +87,7 @@ function formatDistance(meters: number): string {
 const PLACE_ORDER = ['home', 'kids_pool', 'big_park', 'amphitheatre'] as const;
 
 const PLACE_LABELS: Record<(typeof PLACE_ORDER)[number], string> = {
-  home: 'Barn',
+  home: 'Home',
   kids_pool: 'Pool',
   big_park: 'Big Park',
   amphitheatre: 'Amphitheatre',
@@ -194,6 +196,7 @@ function createMapStyles(palette: ThemePalette) {
       marginTop: spacing.sm,
       flexDirection: 'row',
       justifyContent: 'flex-end',
+      gap: spacing.sm,
     },
     centerChip: {
       paddingVertical: spacing.xs,
@@ -228,7 +231,7 @@ function createMapStyles(palette: ThemePalette) {
     },
     placePinWrap: { alignItems: 'center' },
     placePinLabel: {
-      color: palette.white,
+      color: isDay ? palette.ink : palette.white,
       fontFamily: fonts.bold,
       fontSize: 11,
       letterSpacing: 1,
@@ -236,7 +239,9 @@ function createMapStyles(palette: ThemePalette) {
       paddingHorizontal: 6,
       paddingVertical: 2,
       borderRadius: radius.pill,
-      backgroundColor: isDay ? 'rgba(10,10,10,0.78)' : 'rgba(0,0,0,0.7)',
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      backgroundColor: isDay ? 'rgba(244,242,238,0.95)' : 'rgba(0,0,0,0.7)',
       overflow: 'hidden',
     },
     placePin: {
@@ -340,6 +345,7 @@ export default function MapScreen() {
   const battery = useBattery();
   const mapRef = useRef<MapView | null>(null);
   const [isFollowing, setIsFollowing] = useState(true);
+  const [is3D, setIs3D] = useState(true); // 3D tilt on by default
   const [armedPlaceKey, setArmedPlaceKey] = useState<string | null>(null);
   const lastMovingHeadingRef = useRef(0);
 
@@ -392,13 +398,31 @@ export default function MapScreen() {
             longitude: trip.position.longitude,
           },
           heading: mapHeading,
-          pitch: 0,
+          pitch: is3D && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
         },
         { duration },
       );
     },
-    [trip.position, mapHeading],
+    [trip.position, mapHeading, is3D, trip.speedMph],
   );
+
+  const toggle3D = useCallback(() => {
+    const next = !is3D;
+    setIs3D(next);
+    if (trip.position && mapRef.current) {
+      mapRef.current.animateCamera(
+        {
+          center: {
+            latitude: trip.position.latitude,
+            longitude: trip.position.longitude,
+          },
+          heading: mapHeading,
+          pitch: next && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
+        },
+        { duration: 500 },
+      );
+    }
+  }, [is3D, trip.position, mapHeading, trip.speedMph]);
 
   useEffect(() => {
     if (!isFollowing) return;
@@ -413,7 +437,7 @@ export default function MapScreen() {
   const handleMapLongPress = (event: LongPressEvent) => {
     const { coordinate } = event.nativeEvent;
     if (!armedPlace) {
-      Alert.alert('Select a place', 'Tap Barn, Pool, Big Park, or Amphitheatre first.');
+      Alert.alert('Select a place', 'Tap Home, Pool, Big Park, or Amphitheatre first.');
       return;
     }
     const label = placeLabel(armedPlace);
@@ -457,12 +481,12 @@ export default function MapScreen() {
         showsUserLocation={false}
         showsCompass={false}
         showsMyLocationButton={false}
-        showsBuildings={false}
+        showsBuildings
         showsTraffic={false}
         rotateEnabled
         scrollEnabled
         zoomEnabled
-        pitchEnabled={false}
+        pitchEnabled
         onPanDrag={() => setIsFollowing(false)}
         onLongPress={handleMapLongPress}
         initialRegion={{
@@ -536,6 +560,14 @@ export default function MapScreen() {
           </Text>
         </View>
         <View style={styles.centerChipRow} pointerEvents="box-none">
+          <Pressable
+            onPress={toggle3D}
+            style={[styles.centerChip, is3D && styles.centerChipActive]}
+          >
+            <Text style={[styles.centerChipText, is3D && styles.centerChipTextActive]}>
+              3D
+            </Text>
+          </Pressable>
           <Pressable
             onPress={() => {
               setIsFollowing(true);
