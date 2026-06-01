@@ -17,11 +17,12 @@
  * `mcuEncrypt` is a no-op/disabled here, confirmed against the live device).
  *
  * Decoded payload semantics (subset we use):
- *   plain[0]=2, plain[1]=3, plain[2]=1  -> realtime voltage:
+ *   plain[0]=2, plain[1]=3, plain[2]=1  -> realtime voltage + SOC:
  *     voltage(V) = ((plain[4] << 8) | plain[3]) / 100
+ *     percent    = plain[7]   (battery state-of-charge 0-100)
  *
- * Verified against a live device capture: payload `02 03 01 3d 14 3f 14 0b`
- * -> 0x143d / 100 = 51.81 V (checksum 0xdc OK).
+ * Verified against a live device capture: payload `02 03 01 97 17 e6 17 2b`
+ * -> 0x1797 / 100 = 60.39 V, 0x2b = 43 % (monitor showed ~59.75 V / 44 %).
  */
 
 export const RUNLEADER_SERVICE_UUID = '0000FFE0-0000-1000-8000-00805F9B34FB';
@@ -36,8 +37,8 @@ const MCU_FOOTER = 0x7a;
 export type BatteryReading = {
   /** Pack voltage in volts (e.g. 56.25). */
   voltageV: number;
-  /** State of charge 0-100; null until we map the percent frame. */
-  percent: number | null;
+  /** State of charge 0-100, as reported by the monitor. */
+  percent: number;
 };
 
 /** Derive the 6-byte XOR key from advertisement manufacturer data. */
@@ -78,11 +79,11 @@ export function parseFrame(
 /** Parse a payload into a battery reading, if it is a voltage frame. */
 export function parsePayload(plain: number[]): BatteryReading | null {
   // group 2 = realtime; subtype 3 = voltage; mode 1 = current value
-  if (plain.length >= 5 && plain[0] === 2 && plain[1] === 3 && plain[2] === 1) {
+  if (plain.length >= 8 && plain[0] === 2 && plain[1] === 3 && plain[2] === 1) {
     const raw = ((plain[4] << 8) | plain[3]) >>> 0;
     return {
       voltageV: raw / 100,
-      percent: null,
+      percent: plain[7],
     };
   }
   return null;
