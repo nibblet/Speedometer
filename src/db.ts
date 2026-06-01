@@ -28,8 +28,8 @@ export type CheckpointEventRow = {
   at: number;
 };
 
-const DEFAULT_CHECKPOINT_RADIUS_M = 40;
-const LEGACY_CHECKPOINT_RADIUS_M = 85;
+const DEFAULT_CHECKPOINT_RADIUS_M = 20;
+const LEGACY_CHECKPOINT_RADII = [85, 40];
 
 /** Placeholder origin used by earlier builds — pins seeded here are "unplaced". */
 const LEGACY_SEED_ORIGIN = { latitude: 33.502, longitude: -117.063 };
@@ -40,7 +40,7 @@ const DEFAULT_PLACES: {
   latitude: number;
   longitude: number;
 }[] = [
-  { key: 'home', name: 'Barn', latitude: 38.32412971676258, longitude: -85.56328839802686 },
+  { key: 'home', name: 'Home', latitude: 38.32412971676258, longitude: -85.56328839802686 },
   { key: 'kids_pool', name: 'Pool', latitude: 38.33197678197266, longitude: -85.57328078544803 },
   { key: 'big_park', name: 'Big Park', latitude: 38.331669395493265, longitude: -85.57135393835345 },
   { key: 'amphitheatre', name: 'Amphitheatre', latitude: 38.32931018931509, longitude: -85.56877609942313 },
@@ -90,13 +90,15 @@ export function initDb(): void {
   shrinkLegacyCheckpointRadius();
 }
 
-/** Shrink default geofence rings from the old 85 m to 40 m (skips custom radii). */
+/** Shrink default geofence rings to the current default (skips custom radii). */
 function shrinkLegacyCheckpointRadius(): void {
   const database = getDb();
-  database.runSync(`UPDATE checkpoints SET radius_meters = ? WHERE radius_meters = ?`, [
-    DEFAULT_CHECKPOINT_RADIUS_M,
-    LEGACY_CHECKPOINT_RADIUS_M,
-  ]);
+  for (const legacy of LEGACY_CHECKPOINT_RADII) {
+    database.runSync(`UPDATE checkpoints SET radius_meters = ? WHERE radius_meters = ?`, [
+      DEFAULT_CHECKPOINT_RADIUS_M,
+      legacy,
+    ]);
+  }
 }
 
 /** Rename placeholder keys from earlier builds without wiping saved coordinates. */
@@ -107,6 +109,8 @@ function migrateLegacyCheckpointKeys(): void {
     ['pool', 'kids_pool', 'Kids Pool'],
     ['pickleball', 'big_park', 'Big Park'],
   ];
+  // Earlier builds named the home checkpoint "Barn"; rename to "Home".
+  database.runSync(`UPDATE checkpoints SET name = 'Home' WHERE key = 'home' AND name = 'Barn'`);
   for (const [fromKey, toKey, name] of legacy) {
     database.runSync(`UPDATE checkpoints SET key = ?, name = ? WHERE key = ?`, [
       toKey,
