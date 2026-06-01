@@ -11,7 +11,6 @@ import { Platform } from 'react-native';
 import {
   RUNLEADER_SERVICE_UUID,
   RUNLEADER_NOTIFY_UUID,
-  macKeyFromManufacturerData,
   decodeNotification,
   bytesFromBase64,
   type BatteryReading,
@@ -99,7 +98,6 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
   const [devSimulate, setDevSimulate] = useState(false);
 
   const managerRef = useRef<any | null>(null);
-  const macKeyRef = useRef<number[] | null>(null);
   const deviceRef = useRef<any | null>(null);
   const wantConnectedRef = useRef(false);
   const monitorSubRef = useRef<any | null>(null);
@@ -130,19 +128,9 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
   const handleNotification = useCallback(
     (valueB64: string | null | undefined) => {
       if (!valueB64) return;
-      const bytes = bytesFromBase64(valueB64);
-      if (__DEV__) {
-        console.log(
-          '[BLE] notify',
-          bytes.map((b) => b.toString(16).padStart(2, '0')).join(' '),
-          'macKey',
-          macKeyRef.current
-            ?.map((b) => b.toString(16).padStart(2, '0'))
-            .join(' '),
-        );
-      }
-      const reading: BatteryReading | null = decodeNotification(bytes);
-      if (__DEV__) console.log('[BLE] decoded', reading);
+      const reading: BatteryReading | null = decodeNotification(
+        bytesFromBase64(valueB64),
+      );
       if (reading) {
         patch({
           voltageV: reading.voltageV,
@@ -162,10 +150,7 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
         RUNLEADER_SERVICE_UUID,
         RUNLEADER_NOTIFY_UUID,
         (err: any, characteristic: any) => {
-          if (err) {
-            if (__DEV__) console.log('[BLE] monitor error', err?.message ?? err);
-            return; // disconnect handler deals with teardown
-          }
+          if (err) return; // disconnect handler deals with teardown
           handleNotification(characteristic?.value);
         },
       );
@@ -181,40 +166,12 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
         mgr.stopDeviceScan();
         patch({ scanning: false });
 
-        // Derive the XOR key (device MAC) from the advertisement, falling back
-        // to the Android platform MAC reversed.
-        let macKey = macKeyFromManufacturerData(
-          scanned.manufacturerData
-            ? bytesFromBase64(scanned.manufacturerData)
-            : null,
-        );
-        if (!macKey && Platform.OS === 'android' && scanned.id?.includes(':')) {
-          macKey = scanned.id
-            .split(':')
-            .map((h: string) => parseInt(h, 16))
-            .reverse();
-        }
-        macKeyRef.current = macKey;
-        if (__DEV__) {
-          console.log(
-            '[BLE] connecting to',
-            scanned.id,
-            scanned.name ?? scanned.localName,
-            'mfg',
-            scanned.manufacturerData,
-            'macKey',
-            macKey?.map((b: number) => b.toString(16)).join(' ') ?? 'NONE',
-          );
-        }
-
         const device = await scanned.connect();
         await device.discoverAllServicesAndCharacteristics();
         deviceRef.current = device;
-        if (__DEV__) console.log('[BLE] connected + discovered');
 
         disconnectSubRef.current?.remove();
-        disconnectSubRef.current = device.onDisconnected((err: any) => {
-          if (__DEV__) console.log('[BLE] disconnected', err?.message ?? 'ok');
+        disconnectSubRef.current = device.onDisconnected(() => {
           patch({ connected: false });
           deviceRef.current = null;
           if (wantConnectedRef.current) scan(); // auto-reconnect
@@ -223,7 +180,6 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
         subscribe(device);
         patch({ connected: true, error: null });
       } catch (e: any) {
-        if (__DEV__) console.log('[BLE] connect error', e?.message ?? e);
         patch({ connected: false, error: e?.message ?? 'connect failed' });
         if (wantConnectedRef.current) setTimeout(() => scan(), 2000);
       }

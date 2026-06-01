@@ -41,17 +41,6 @@ export type BatteryReading = {
   percent: number;
 };
 
-/** Derive the 6-byte XOR key from advertisement manufacturer data. */
-export function macKeyFromManufacturerData(
-  manufacturerData: Uint8Array | number[] | null | undefined,
-): number[] | null {
-  if (!manufacturerData) return null;
-  const bytes = Array.from(manufacturerData);
-  // Layout: [companyId(2)] [status(6)] [mac(6)] — the MAC is the trailing 6.
-  if (bytes.length < 6) return null;
-  return bytes.slice(bytes.length - 6);
-}
-
 /** Validate an MCU frame and return its cid + payload. */
 export function parseFrame(
   frame: number[],

@@ -278,6 +278,7 @@ export default function SpeedometerScreen() {
 
   const [mode, setMode] = useState<Mode>('analog');
   const [appearanceModal, setAppearanceModal] = useState(false);
+  const [batteryShowVoltage, setBatteryShowVoltage] = useState(false);
 
   useEffect(() => {
     if (!trip.hasPermission) {
@@ -293,9 +294,13 @@ export default function SpeedometerScreen() {
     }
   }, [battery.available]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const batteryConnected = battery.percent != null && battery.voltageV != null;
   const batteryValue = (() => {
-    if (battery.percent != null) return `${Math.round(battery.percent)}%`;
-    if (battery.voltageV != null) return `${battery.voltageV.toFixed(1)}V`;
+    if (batteryConnected) {
+      return batteryShowVoltage
+        ? `${battery.voltageV!.toFixed(1)}V`
+        : `${Math.round(battery.percent!)}%`;
+    }
     if (battery.available) return battery.scanning ? '···' : '--';
     return '--';
   })();
@@ -452,7 +457,16 @@ export default function SpeedometerScreen() {
       <View style={styles.statsRow}>
         <Stat label="TRIP" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
         <Stat label="MAX" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
-        <Stat label="BATTERY" value={batteryValue} styles={styles} />
+        <Stat
+          label="BATTERY"
+          value={batteryValue}
+          styles={styles}
+          onPress={
+            batteryConnected
+              ? () => setBatteryShowVoltage((v) => !v)
+              : undefined
+          }
+        />
         <Stat label="HEADING" value={bearingLabel(trip.headingDeg)} styles={styles} />
       </View>
     </SafeAreaView>
@@ -486,15 +500,25 @@ function Stat({
   label,
   value,
   styles,
+  onPress,
 }: {
   label: string;
   value: string;
   styles: ReturnType<typeof createStyles>;
+  onPress?: () => void;
 }) {
-  return (
-    <View style={styles.stat}>
+  const content = (
+    <>
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={styles.statValue}>{value}</Text>
-    </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressable style={styles.stat} onPress={onPress} hitSlop={8}>
+        {content}
+      </Pressable>
+    );
+  }
+  return <View style={styles.stat}>{content}</View>;
 }

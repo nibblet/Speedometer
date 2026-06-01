@@ -1,10 +1,9 @@
 # Runleader RL-BI025-BT — BLE protocol notes
 
-Reverse-engineered from the official **Moresee** Android app (v1.1.9) and verified
-against a live device. The monitor uses the **AiLink / pingwang** BLE platform.
-There is no public spec; everything below was recovered from
-`libAILinkBle-lib.so` + the `com.pingwang.moduleruilite` parser and confirmed
-with a real capture (**56.25 V / 100 %**, MAC bytes `77 AE 04 FE B9 01`).
+Reverse-engineered from the official **Moresee** app and confirmed by live
+on-device capture (iPhone + react-native-ble-plx, logged in this project). The
+monitor uses the **AiLink / pingwang** BLE platform and advertises as
+`AiLink_xxxx`. There is no public spec.
 
 ## Transport (GATT)
 
@@ -15,65 +14,55 @@ with a real capture (**56.25 V / 100 %**, MAC bytes `77 AE 04 FE B9 01`).
 | **Notify (realtime data)** | `0000FFE2` (Read / Notify) |
 | Write+Notify (config) | `0000FFE3` |
 
-The device advertises as `AiLink_xxxx` and **streams realtime frames on FFE2 by
-itself** once a client subscribes. Reading is therefore passive: connect →
-subscribe → decode. No handshake or polling is required (handshake only gates
-*outbound* commands / binding).
+The device **streams realtime frames on FFE2 by itself** once a client
+subscribes. Reading is passive: connect → subscribe → decode. No handshake,
+command, or polling is required.
 
-> Only one BLE central can connect at a time — close Moresee before connecting
-> from another app.
+Behavioural notes observed live:
+- The monitor sends one burst of frames, then **disconnects**, then re-advertises.
+  The app simply auto-reconnects on disconnect; a fresh voltage/SoC arrives each
+  cycle (every few seconds).
+- Only one BLE central can connect at a time — **close Moresee** before
+  connecting from another app.
+- The advertisement manufacturer data is `<496E> 00 1F 00 29 00 14 <MAC×6>`;
+  the `00 1F 00 29 00 14` block is static device info (not live voltage), so the
+  reading must come from the FFE2 connection, not the advert.
 
 ## Frame format (FFE2 notifications)
 
 ```
-A7 | cidHi cidLo | len | <encrypted payload (len bytes)> | checksum | 7A
+A7 | cidHi cidLo | len | payload (len bytes) | checksum | 7A
 ```
 
-- Header `0xA7`, footer `0x7A` (these are MCU frames; `0xA6 … 0x6A` are "BLE"
-  frames, unused here).
-- `cid` = product id; **`0x001F` (31)** for the RL-BI025.
-- `checksum` = `sum(bytes[1 .. len+3]) & 0xFF` (cid + len + payload).
-
-## Payload encryption (symmetric XOR)
-
-Despite the SDK calling it `mcuEncrypt`/TEA, the per-frame transform recovered
-from the native `Java_..._mcuEncrypt` is a simple byte XOR:
-
-```
-plain[i] = enc[i] ^ macKey[i % 6] ^ cid[i & 1]
-```
-
-- `cid` bytes are each forced to ≥ 1 (a `0x00` byte is treated as `0x01`).
-- `macKey` = the device's 6-byte MAC. iOS does not expose the MAC, so take the
-  **trailing 6 bytes of the advertisement manufacturer data**
-  (`… 77 AE 04 FE B9 01`). On Android the platform MAC string reversed yields
-  the same 6 bytes.
-
-The cipher is symmetric, so the same operation encrypts outbound commands.
-
-(The advertisement also carries an encrypted realtime block via
-`decryptBroadcast`, which uses standard TEA — key `0123456789ABCDEFFEDCBA9876543210`,
-delta `0x9E3779B9`, 32 rounds — parameterised by device CID/PID. Not used here;
-the connection path is simpler and verified.)
+- Header `0xA7`, footer `0x7A`.
+- `cid` = product id; `0x001F` (31) for the RL-BI025.
+- `checksum = sum(bytes[1 .. len+3]) & 0xFF` (cid + len + payload).
+- **Payload is plaintext** — there is no encryption on this firmware. (The
+  AiLink SDK exposes an `mcuEncrypt` path, but it is a no-op here: every live
+  frame decodes directly, and an XOR attempt corrupted them.)
 
 ## Decoded payload semantics
 
-`plain[0]` = group (`1` = device info, `2` = realtime), `plain[1]` = subtype.
+`payload[0]` = group (`1` = device info, `2` = realtime), `payload[1]` = subtype,
+`payload[2]` = mode.
 
-| group/sub | meaning | decode |
-|-----------|---------|--------|
-| 2 / 3 (mode `plain[2]==1`) | **voltage + SoC** | `V = ((plain[4]<<8)\|plain[3]) / 100`; `pct = plain[7]` |
-| 2 / 2 | RPM | `(plain[4]<<8)\|plain[3]`, max `(plain[6]<<8)\|plain[5]` |
-| 2 / 5 | speed | `((plain[4]<<8)\|plain[3]) / 10` |
-| 2 / 6 | odometer/mileage | 32-bit LE / 1000 |
-| 2 / 4 | temperature | `… / 10` |
-| 1 / 4 | device battery (coin cell) | `plain[4]`, `plain[3]` |
+| group/sub/mode | meaning | decode |
+|----------------|---------|--------|
+| `02 03 01` | **voltage + state-of-charge** (used by the app) | `V = ((p[4]<<8)\|p[3]) / 100`; `pct = p[7]` |
+| `01 00 02` | firmware/version string | ASCII, e.g. `H1.1S1.002` |
+| `01 00 01` | device info | mirrors advert `1F 00 29 00 14` |
+| `02 03 02` / `02 03 05` / `02 01 0x` | other realtime/config frames | observed but unmapped (setpoints, counters) |
 
-Only the voltage frame (2/3/1) is consumed by the app today.
+Only the `02 03 01` voltage frame is consumed today.
 
-## Verification
+## Verification (live captures)
 
-Captured frame `A7 00 1F 0B 74 B0 01 E1 B8 1E 76 B1 05 E1 B8 CB 7A`
-→ checksum OK, decrypts to `02 01 04 00 00 00 00 00 00 00 00` (a valid zeroed
-timing frame). A synthetic 56.25 V / 100 % voltage frame round-trips exactly.
-See `src/ble/runleader.ts`.
+| Raw FFE2 frame | Decodes to | Monitor showed |
+|----------------|-----------|----------------|
+| `A7 00 1F 08 02 03 01 97 17 E6 17 2B 03 7A` | `60.39 V`, `0x2B = 43 %` | ~59.75 V / 44 % (charging) |
+| `A7 00 1F 08 02 03 01 3D 14 3F 14 0B DC 7A` | `51.81 V`, `0x0B = 11 %` | (resting, low SoC) |
+
+`p[7]` (SoC) was initially mistaken for a counter; the ground-truth 44 % capture
+confirmed it tracks battery percent. While charging the terminal voltage runs
+high (~60 V on a 48 V pack) even at mid SoC — expected. See
+`src/ble/runleader.ts`.
