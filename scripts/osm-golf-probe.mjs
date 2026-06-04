@@ -39,7 +39,12 @@ function query(pattern) {
 async function probe(pattern) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      // Public Overpass instances reject requests with no User-Agent (HTTP 406).
+      'User-Agent': 'cartpath-osm-golf-probe/1.0 (coverage check)',
+      Accept: 'application/json',
+    },
     body: 'data=' + encodeURIComponent(query(pattern)),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
