@@ -489,10 +489,23 @@ export default function MapScreen() {
   }, [trip.speedMph, trip.headingDeg]);
 
   const animateToCart = useCallback(
-    (duration = 600) => {
-      if (!trip.position || !mapRef.current) return;
-      mapRef.current.animateCamera(
+    async (duration = 600) => {
+      const map = mapRef.current;
+      if (!trip.position || !map) return;
+      // Preserve the current zoom/altitude. On iOS (Apple Maps) a camera with no
+      // altitude resets to a fully zoomed-out world view; because this runs on
+      // every GPS tick it kept overriding pinch-to-zoom, so the map appeared
+      // stuck zoomed all the way out. Reading the live camera keeps the user's
+      // zoom and only moves the center/heading/pitch.
+      let camera: Awaited<ReturnType<typeof map.getCamera>> | undefined;
+      try {
+        camera = await map.getCamera();
+      } catch {
+        camera = undefined;
+      }
+      map.animateCamera(
         {
+          ...(camera ?? {}),
           center: {
             latitude: trip.position.latitude,
             longitude: trip.position.longitude,
@@ -506,22 +519,29 @@ export default function MapScreen() {
     [trip.position, mapHeading, is3D, trip.speedMph],
   );
 
-  const toggle3D = useCallback(() => {
+  const toggle3D = useCallback(async () => {
     const next = !is3D;
     setIs3D(next);
-    if (trip.position && mapRef.current) {
-      mapRef.current.animateCamera(
-        {
-          center: {
-            latitude: trip.position.latitude,
-            longitude: trip.position.longitude,
-          },
-          heading: mapHeading,
-          pitch: next && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
-        },
-        { duration: 500 },
-      );
+    const map = mapRef.current;
+    if (!trip.position || !map) return;
+    let camera: Awaited<ReturnType<typeof map.getCamera>> | undefined;
+    try {
+      camera = await map.getCamera();
+    } catch {
+      camera = undefined;
     }
+    map.animateCamera(
+      {
+        ...(camera ?? {}),
+        center: {
+          latitude: trip.position.latitude,
+          longitude: trip.position.longitude,
+        },
+        heading: mapHeading,
+        pitch: next && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
+      },
+      { duration: 500 },
+    );
   }, [is3D, trip.position, mapHeading, trip.speedMph]);
 
   useEffect(() => {
