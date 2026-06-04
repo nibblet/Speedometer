@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
 import { ACCENTS, fonts, radius, spacing, SPEED_MAX_MPH, type ThemePalette } from '@/theme';
+import { FEATURES } from '@/config';
 import { useTrip } from '@/context/TripContext';
 import { useBattery } from '@/context/BatteryContext';
 import { useAppearance, type AppearanceMode } from '@/context/AppearanceContext';
@@ -493,16 +494,18 @@ export default function SpeedometerScreen() {
       <View style={styles.statsRow}>
         <Stat label="TRIP" value={`${trip.distanceMiles.toFixed(2)} mi`} styles={styles} />
         <Stat label="MAX" value={`${Math.round(trip.maxMph)} mph`} styles={styles} />
-        <Stat
-          label="BATTERY"
-          value={batteryValue}
-          styles={styles}
-          onPress={
-            batteryConnected
-              ? () => setBatteryShowVoltage((v) => !v)
-              : undefined
-          }
-        />
+        {FEATURES.battery && (
+          <Stat
+            label="BATTERY"
+            value={batteryValue}
+            styles={styles}
+            onPress={
+              batteryConnected
+                ? () => setBatteryShowVoltage((v) => !v)
+                : undefined
+            }
+          />
+        )}
       </View>
     </SafeAreaView>
   );
