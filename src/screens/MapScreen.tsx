@@ -28,6 +28,7 @@ import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
 import { useBattery } from '@/context/BatteryContext';
 import { useDaylightMessage } from '@/hooks/useDaylightMessage';
+import { FEATURES } from '@/config';
 import {
   createCheckpoint,
   deleteCheckpoint,
@@ -700,10 +701,12 @@ export default function MapScreen() {
               <Text style={styles.statLabel}>DISTANCE</Text>
               <Text style={styles.miniValue}>{trip.distanceMiles.toFixed(2)} mi</Text>
             </View>
-            <View style={styles.miniStat}>
-              <Text style={styles.statLabel}>CHARGE</Text>
-              <Text style={styles.miniValue}>{chargeValue}</Text>
-            </View>
+            {FEATURES.battery && (
+              <View style={styles.miniStat}>
+                <Text style={styles.statLabel}>CHARGE</Text>
+                <Text style={styles.miniValue}>{chargeValue}</Text>
+              </View>
+            )}
           </View>
         </View>
         <View style={styles.sunsetRow}>
