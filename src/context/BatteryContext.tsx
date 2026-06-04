@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { Platform } from 'react-native';
+import { FEATURES } from '@/config';
 import {
   RUNLEADER_SERVICE_UUID,
   RUNLEADER_NOTIFY_UUID,
@@ -108,8 +109,11 @@ export function BatteryProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, ...p }));
   }, []);
 
-  // Initialize the manager once.
+  // Initialize the manager once. Skipped entirely when the battery feature is
+  // disabled (public build): the native BLE module is never loaded and the
+  // provider stays inert (`available: false`), so the hooks remain safe to call.
   useEffect(() => {
+    if (!FEATURES.battery) return;
     const mgr = loadBleManager();
     managerRef.current = mgr;
     patch({ available: mgr != null });
