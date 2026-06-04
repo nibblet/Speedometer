@@ -19,6 +19,15 @@ export type Checkpoint = {
   latitude: number;
   longitude: number;
   radiusMeters: number;
+  /** ms epoch the place was created; used for stable ordering. May be null on legacy rows. */
+  createdAt: number | null;
+};
+
+export type NewCheckpoint = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number;
 };
 
 export type CheckpointEventRow = {
@@ -29,22 +38,6 @@ export type CheckpointEventRow = {
 };
 
 const DEFAULT_CHECKPOINT_RADIUS_M = 20;
-const LEGACY_CHECKPOINT_RADII = [85, 40];
-
-/** Placeholder origin used by earlier builds — pins seeded here are "unplaced". */
-const LEGACY_SEED_ORIGIN = { latitude: 33.502, longitude: -117.063 };
-
-const DEFAULT_PLACES: {
-  key: string;
-  name: string;
-  latitude: number;
-  longitude: number;
-}[] = [
-  { key: 'home', name: 'Home', latitude: 38.32412971676258, longitude: -85.56328839802686 },
-  { key: 'kids_pool', name: 'Pool', latitude: 38.33197678197266, longitude: -85.57328078544803 },
-  { key: 'big_park', name: 'Big Park', latitude: 38.331669395493265, longitude: -85.57135393835345 },
-  { key: 'amphitheatre', name: 'Amphitheatre', latitude: 38.32931018931509, longitude: -85.56877609942313 },
-];
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -73,7 +66,8 @@ export function initDb(): void {
       name TEXT NOT NULL,
       latitude REAL NOT NULL,
       longitude REAL NOT NULL,
-      radius_meters REAL NOT NULL DEFAULT ${DEFAULT_CHECKPOINT_RADIUS_M}
+      radius_meters REAL NOT NULL DEFAULT ${DEFAULT_CHECKPOINT_RADIUS_M},
+      created_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS checkpoint_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,82 +78,59 @@ export function initDb(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_checkpoint_events_at ON checkpoint_events(at DESC);
   `);
-  migrateLegacyCheckpointKeys();
-  ensureDefaultCheckpoints();
-  relocateLegacyDefaultCheckpoints();
-  shrinkLegacyCheckpointRadius();
+  ensureCheckpointColumns();
 }
 
-/** Shrink default geofence rings to the current default (skips custom radii). */
-function shrinkLegacyCheckpointRadius(): void {
+/** Add columns introduced after the original schema, for installs created on older builds. */
+function ensureCheckpointColumns(): void {
   const database = getDb();
-  for (const legacy of LEGACY_CHECKPOINT_RADII) {
-    database.runSync(`UPDATE checkpoints SET radius_meters = ? WHERE radius_meters = ?`, [
-      DEFAULT_CHECKPOINT_RADIUS_M,
-      legacy,
-    ]);
+  // ALTER throws if the column already exists; that's the "already migrated" case.
+  try {
+    database.execSync(`ALTER TABLE checkpoints ADD COLUMN created_at INTEGER`);
+  } catch {
+    /* column already present */
   }
 }
 
-/** Rename placeholder keys from earlier builds without wiping saved coordinates. */
-function migrateLegacyCheckpointKeys(): void {
-  const database = getDb();
-  const legacy: [string, string, string][] = [
-    ['sunset', 'home', 'Home'],
-    ['pool', 'kids_pool', 'Kids Pool'],
-    ['pickleball', 'big_park', 'Big Park'],
-  ];
-  // Earlier builds named the home checkpoint "Barn"; rename to "Home".
-  database.runSync(`UPDATE checkpoints SET name = 'Home' WHERE key = 'home' AND name = 'Barn'`);
-  for (const [fromKey, toKey, name] of legacy) {
-    database.runSync(`UPDATE checkpoints SET key = ?, name = ? WHERE key = ?`, [
-      toKey,
-      name,
-      fromKey,
-    ]);
-  }
+let placeKeySeq = 0;
+
+/** Unique, non-semantic key for a user-created place (the `key` column stays UNIQUE NOT NULL). */
+function nextPlaceKey(): string {
+  placeKeySeq += 1;
+  return `place_${Date.now().toString(36)}_${placeKeySeq.toString(36)}`;
 }
 
-/** Insert missing default places at their real coordinates; preserve existing. */
-function ensureDefaultCheckpoints(): void {
+/** Create a user place at the given coordinate. Returns the inserted row. */
+export function createCheckpoint(input: NewCheckpoint): Checkpoint {
   const database = getDb();
-  for (const place of DEFAULT_PLACES) {
-    const existing = database.getFirstSync<{ key: string }>(
-      'SELECT key FROM checkpoints WHERE key = ?',
-      [place.key],
-    );
-    if (existing != null) continue;
-    database.runSync(
-      `INSERT INTO checkpoints (key, name, latitude, longitude, radius_meters)
-       VALUES (?, ?, ?, ?, ?)`,
-      [place.key, place.name, place.latitude, place.longitude, DEFAULT_CHECKPOINT_RADIUS_M],
-    );
-  }
+  const createdAt = Date.now();
+  const radius = input.radiusMeters ?? DEFAULT_CHECKPOINT_RADIUS_M;
+  const key = nextPlaceKey();
+  const result = database.runSync(
+    `INSERT INTO checkpoints (key, name, latitude, longitude, radius_meters, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [key, input.name, input.latitude, input.longitude, radius, createdAt],
+  );
+  return {
+    id: result.lastInsertRowId,
+    key,
+    name: input.name,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    radiusMeters: radius,
+    createdAt,
+  };
 }
 
-/**
- * Earlier builds seeded every place at a placeholder origin, so all pins stacked
- * on one far-away point. Move any checkpoint still sitting on that origin to its
- * real coordinate. Idempotent: only rows still at the legacy origin are touched,
- * so user-placed pins are never overwritten.
- */
-function relocateLegacyDefaultCheckpoints(): void {
+export function renameCheckpoint(id: number, name: string): void {
   const database = getDb();
-  for (const place of DEFAULT_PLACES) {
-    database.runSync(
-      `UPDATE checkpoints SET latitude = ?, longitude = ?
-         WHERE key = ?
-           AND ABS(latitude - ?) < 1e-4
-           AND ABS(longitude - ?) < 1e-4`,
-      [
-        place.latitude,
-        place.longitude,
-        place.key,
-        LEGACY_SEED_ORIGIN.latitude,
-        LEGACY_SEED_ORIGIN.longitude,
-      ],
-    );
-  }
+  database.runSync(`UPDATE checkpoints SET name = ? WHERE id = ?`, [name, id]);
+}
+
+export function deleteCheckpoint(id: number): void {
+  const database = getDb();
+  database.runSync(`DELETE FROM checkpoint_events WHERE checkpoint_id = ?`, [id]);
+  database.runSync(`DELETE FROM checkpoints WHERE id = ?`, [id]);
 }
 
 export function listCheckpoints(): Checkpoint[] {
@@ -171,10 +142,11 @@ export function listCheckpoints(): Checkpoint[] {
     latitude: number;
     longitude: number;
     radius_meters: number;
+    created_at: number | null;
   }>(
-    `SELECT id, key, name, latitude, longitude, radius_meters
+    `SELECT id, key, name, latitude, longitude, radius_meters, created_at
        FROM checkpoints
-       ORDER BY name COLLATE NOCASE ASC`,
+       ORDER BY created_at IS NULL, created_at ASC, name COLLATE NOCASE ASC`,
   );
   return rows.map((r) => ({
     id: r.id,
@@ -183,15 +155,16 @@ export function listCheckpoints(): Checkpoint[] {
     latitude: r.latitude,
     longitude: r.longitude,
     radiusMeters: r.radius_meters,
+    createdAt: r.created_at,
   }));
 }
 
-export function updateCheckpointCoordinates(key: string, latitude: number, longitude: number): void {
+export function updateCheckpointCoordinates(id: number, latitude: number, longitude: number): void {
   const database = getDb();
-  database.runSync(`UPDATE checkpoints SET latitude = ?, longitude = ? WHERE key = ?`, [
+  database.runSync(`UPDATE checkpoints SET latitude = ?, longitude = ? WHERE id = ?`, [
     latitude,
     longitude,
-    key,
+    id,
   ]);
 }
 
