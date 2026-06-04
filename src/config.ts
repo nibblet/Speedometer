@@ -5,7 +5,9 @@
  * personal hardware integration that isn't relevant to public/App Store users.
  * It's OFF by default; enable it for a personal build with:
  *
- *   EXPO_PUBLIC_ENABLE_BATTERY=1 npx expo run:ios   (or in the EAS build env)
+ *   npm run ios:personal
+ *   npm run start:personal          (dev client + Metro)
+ *   npm run build:ios:personal      (EAS profile `personal` in eas.json)
  *
  * The same env var drives the native Bluetooth permissions/plugin in
  * app.config.js, so flipping it keeps the JS UI and the native config in sync.
