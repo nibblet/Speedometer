@@ -30,13 +30,6 @@ export type NewCheckpoint = {
   radiusMeters?: number;
 };
 
-export type CheckpointEventRow = {
-  id: number;
-  checkpointId: number;
-  kind: 'enter' | 'exit';
-  at: number;
-};
-
 const DEFAULT_CHECKPOINT_RADIUS_M = 20;
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -69,14 +62,6 @@ export function initDb(): void {
       radius_meters REAL NOT NULL DEFAULT ${DEFAULT_CHECKPOINT_RADIUS_M},
       created_at INTEGER
     );
-    CREATE TABLE IF NOT EXISTS checkpoint_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      checkpoint_id INTEGER NOT NULL,
-      kind TEXT NOT NULL CHECK(kind IN ('enter','exit')),
-      at INTEGER NOT NULL,
-      FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_checkpoint_events_at ON checkpoint_events(at DESC);
   `);
   ensureCheckpointColumns();
 }
@@ -129,7 +114,6 @@ export function renameCheckpoint(id: number, name: string): void {
 
 export function deleteCheckpoint(id: number): void {
   const database = getDb();
-  database.runSync(`DELETE FROM checkpoint_events WHERE checkpoint_id = ?`, [id]);
   database.runSync(`DELETE FROM checkpoints WHERE id = ?`, [id]);
 }
 
@@ -166,36 +150,6 @@ export function updateCheckpointCoordinates(id: number, latitude: number, longit
     longitude,
     id,
   ]);
-}
-
-export function insertCheckpointEvent(checkpointId: number, kind: 'enter' | 'exit'): void {
-  const database = getDb();
-  database.runSync(
-    `INSERT INTO checkpoint_events (checkpoint_id, kind, at) VALUES (?, ?, ?)`,
-    [checkpointId, kind, Date.now()],
-  );
-}
-
-export function listCheckpointEvents(limit = 200): CheckpointEventRow[] {
-  const database = getDb();
-  const rows = database.getAllSync<{
-    id: number;
-    checkpoint_id: number;
-    kind: 'enter' | 'exit';
-    at: number;
-  }>(
-    `SELECT id, checkpoint_id, kind, at
-       FROM checkpoint_events
-       ORDER BY at DESC
-       LIMIT ?`,
-    [limit],
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    checkpointId: r.checkpoint_id,
-    kind: r.kind,
-    at: r.at,
-  }));
 }
 
 export function saveTrip(trip: NewTrip): number {

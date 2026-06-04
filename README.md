@@ -72,8 +72,6 @@ golf-cart-speedo/
     ├── db.ts                        # SQLite trips + checkpoint places
     ├── hooks/
     │   └── useDaylightMessage.ts    # Contextual MAP daylight banner
-    ├── data/
-    │   └── savedLoops.ts            # Favorite jaunt route shapes (code-edited)
     ├── context/
     │   └── TripContext.tsx          # Live GPS state, breadcrumb, auto-save on bg
     ├── components/
@@ -82,7 +80,7 @@ golf-cart-speedo/
     │   └── CompassRose.tsx          # Rotating compass with N/E/S/W
     ├── screens/
     │   ├── SpeedometerScreen.tsx    # Toggle + dial/digital + stats
-    │   ├── MapScreen.tsx            # Course-up map, places, jaunts
+    │   ├── MapScreen.tsx            # Course-up map and user-managed places
     │   └── HistoryScreen.tsx        # Past trips list
     └── navigation/
         └── RootNavigator.tsx        # Bottom tabs with custom tab bar
@@ -109,18 +107,16 @@ every component reads from there.
 - **Trip lifecycle**: a trip starts on app launch, ends when the app is fully backgrounded (`AppState` `background`), and is saved to SQLite if it covered ≥ 0.02 mi (~100 ft)
 - **Map**: course-up Apple Maps (rotates with your heading while moving); pan/zoom freely — tap **CENTER** to resume GPS follow; ~20% closer default zoom than before
 - **Daylight banner**: time-of-day messages (sunrise/sunset windows, golden hour, lunch lap, headlights countdown) via SunCalc + local clock — see `src/hooks/useDaylightMessage.ts`
-- **Places**: four saved spots (Barn, Pool, Big Park, Amphitheatre) stored in SQLite; orange geofence circles log enter/exit while driving
+- **Places**: user-named spots stored in SQLite; orange geofence circles on the map
 
 ## Map tab — Places
 
-### Setting a place (in app)
+### Adding or moving a place (in app)
 
 1. Open the **MAP** tab and wait for GPS.
-2. Tap a **PLACES** chip (Barn, Pool, Big Park, or Amphitheatre) to arm it — lat/lng appears below.
-3. **Long-press** the map where the place should be → confirm **Set**.
-4. The orange circle and pin move; coordinates persist across app restarts.
-
-On first launch, all four places start at `SAVED_LOOP_ORIGIN` in `savedLoops.ts` until you set them.
+2. Tap **+** in the places bar to add a spot at your current location, or tap a chip to select one.
+3. **Long-press** the map where the place should be → confirm **Set** (or use rename/delete from the chip).
+4. Coordinates persist across app restarts.
 
 ### Map follow mode
 

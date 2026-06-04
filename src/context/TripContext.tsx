@@ -9,12 +9,7 @@ import React, {
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
-import {
-  saveTrip,
-  listCheckpoints,
-  insertCheckpointEvent,
-  type Checkpoint,
-} from '@/db';
+import { saveTrip, listCheckpoints, type Checkpoint } from '@/db';
 
 const MS_TO_MPH = 2.23694;
 const SMOOTH_WINDOW = 4; // moving-average window for speed
@@ -41,7 +36,7 @@ type TripContextValue = TripState & {
   /** Dev-only: synthetic speed/heading for testing UI without driving */
   devSimulateMotion: boolean;
   setDevSimulateMotion: (on: boolean) => void;
-  /** Saved checkpoint places (persisted); enter/exit recorded to SQLite while driving. */
+  /** Saved places (persisted in SQLite). */
   checkpoints: Checkpoint[];
   refreshCheckpoints: () => void;
 };
@@ -79,40 +74,6 @@ function haversineMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(x));
 }
 
-/** Enter at full radius; exit only after GPS leaves an expanded ring (reduces jitter). */
-function checkpointHysteresis(
-  wasInside: boolean,
-  distanceMeters: number,
-  radiusMeters: number,
-): boolean {
-  const exitStretch = 1.35;
-  if (!wasInside) return distanceMeters <= radiusMeters;
-  return distanceMeters <= radiusMeters * exitStretch;
-}
-
-function evaluateCheckpointTransitions(
-  pos: LatLng,
-  checkpoints: Checkpoint[],
-  insideIds: Set<number>,
-): void {
-  for (const cp of checkpoints) {
-    const d = haversineMeters(pos, {
-      latitude: cp.latitude,
-      longitude: cp.longitude,
-    });
-    const was = insideIds.has(cp.id);
-    const next = checkpointHysteresis(was, d, cp.radiusMeters);
-    if (next === was) continue;
-    if (next) insideIds.add(cp.id);
-    else insideIds.delete(cp.id);
-    try {
-      insertCheckpointEvent(cp.id, next ? 'enter' : 'exit');
-    } catch (e) {
-      console.warn('checkpoint event failed', e);
-    }
-  }
-}
-
 function loadCheckpointsSafe(): Checkpoint[] {
   try {
     return listCheckpoints();
@@ -133,8 +94,6 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const subRef = useRef<Location.LocationSubscription | null>(null);
   const headingSubRef = useRef<Location.LocationSubscription | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const checkpointsRef = useRef<Checkpoint[]>(checkpoints);
-  const insideCheckpointIdsRef = useRef<Set<number>>(new Set());
   // iOS often stops delivering watchPositionAsync callbacks after backgrounding;
   // tear down and recreate subscriptions whenever we leave/return foreground.
   const [appForeground, setAppForeground] = useState(
@@ -149,10 +108,6 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     devSimulateMotionRef.current = __DEV__ && devSimulateMotion;
   }, [devSimulateMotion]);
-
-  useEffect(() => {
-    checkpointsRef.current = checkpoints;
-  }, [checkpoints]);
 
   const refreshCheckpoints = useCallback(() => {
     setCheckpoints(loadCheckpointsSafe());
@@ -280,11 +235,6 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
             };
           });
 
-          evaluateCheckpointTransitions(
-            newPos,
-            checkpointsRef.current,
-            insideCheckpointIdsRef.current,
-          );
         },
       );
       subRef.current = sub;
