@@ -11,6 +11,12 @@
     "preview": {
       "distribution": "internal"
     },
+    "personal": {
+      "extends": "preview",
+      "env": {
+        "EXPO_PUBLIC_ENABLE_BATTERY": "1"
+      }
+    },
     "production": {
       "autoIncrement": true
     }
