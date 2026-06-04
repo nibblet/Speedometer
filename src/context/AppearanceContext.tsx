@@ -10,15 +10,27 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import SunCalc from 'suncalc';
 import type { LatLng } from '@/context/TripContext';
 import { useTrip } from '@/context/TripContext';
-import { palettes, type ThemePalette } from '@/theme';
+import {
+  ACCENTS,
+  DEFAULT_ACCENT_KEY,
+  accentHexForKey,
+  makePalette,
+  type ThemePalette,
+} from '@/theme';
 
 const STORAGE_KEY = 'appearanceMode';
+const ACCENT_STORAGE_KEY = 'accentColor';
 
 export type AppearanceMode = 'auto' | 'day' | 'night';
+
+const ACCENT_KEYS = new Set(ACCENTS.map((a) => a.key));
 
 type AppearanceContextValue = {
   mode: AppearanceMode;
   setMode: (m: AppearanceMode) => void;
+  /** Selected accent color key (see ACCENTS in theme). */
+  accent: string;
+  setAccent: (key: string) => void;
   /** Resolved palette after auto (sun) logic. */
   resolved: 'day' | 'night';
   palette: ThemePalette;
@@ -47,6 +59,7 @@ function resolveDayNight(mode: AppearanceMode, position: LatLng | null): 'day' |
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<AppearanceMode>('auto');
+  const [accent, setAccentState] = useState<string>(DEFAULT_ACCENT_KEY);
   const [hydrated, setHydrated] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -56,6 +69,9 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
         setModeState(raw);
       }
       setHydrated(true);
+    });
+    AsyncStorage.getItem(ACCENT_STORAGE_KEY).then((raw) => {
+      if (raw && ACCENT_KEYS.has(raw)) setAccentState(raw);
     });
   }, []);
 
@@ -69,6 +85,12 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
     AsyncStorage.setItem(STORAGE_KEY, m).catch(() => {});
   }, []);
 
+  const setAccent = useCallback((key: string) => {
+    if (!ACCENT_KEYS.has(key)) return;
+    setAccentState(key);
+    AsyncStorage.setItem(ACCENT_STORAGE_KEY, key).catch(() => {});
+  }, []);
+
   const trip = useTrip();
 
   const resolved = useMemo(() => {
@@ -77,11 +99,14 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
     return resolveDayNight(mode, trip.position);
   }, [mode, trip.position?.latitude, trip.position?.longitude, tick, hydrated]);
 
-  const palette = resolved === 'day' ? palettes.day : palettes.night;
+  const palette = useMemo(
+    () => makePalette(resolved, accentHexForKey(accent)),
+    [resolved, accent],
+  );
 
   const value = useMemo(
-    () => ({ mode, setMode, resolved, palette }),
-    [mode, setMode, resolved, palette],
+    () => ({ mode, setMode, accent, setAccent, resolved, palette }),
+    [mode, setMode, accent, setAccent, resolved, palette],
   );
 
   return (

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
-import { fonts, radius, spacing, SPEED_MAX_MPH, type ThemePalette } from '@/theme';
+import { ACCENTS, fonts, radius, spacing, SPEED_MAX_MPH, type ThemePalette } from '@/theme';
 import { useTrip } from '@/context/TripContext';
 import { useBattery } from '@/context/BatteryContext';
 import { useAppearance, type AppearanceMode } from '@/context/AppearanceContext';
@@ -243,6 +243,29 @@ function createStyles(palette: ThemePalette) {
       fontSize: 12,
       textAlign: 'center',
     },
+    modalDivider: {
+      height: 1,
+      alignSelf: 'stretch',
+      backgroundColor: palette.slateBorder,
+      marginTop: spacing.md,
+      marginBottom: spacing.md,
+    },
+    swatchGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: spacing.md,
+    },
+    swatch: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      borderWidth: 3,
+      borderColor: 'transparent',
+    },
+    swatchActive: {
+      borderColor: palette.white,
+    },
   });
 }
 
@@ -260,6 +283,8 @@ export default function SpeedometerScreen() {
   const {
     mode: appearanceMode,
     setMode: setAppearanceMode,
+    accent,
+    setAccent,
     resolved,
     palette,
   } = useAppearance();
@@ -333,6 +358,27 @@ export default function SpeedometerScreen() {
             <Text style={styles.modalHint}>
               Auto follows sunrise and sunset at your GPS location. Default is auto.
             </Text>
+
+            <View style={styles.modalDivider} />
+            <Text style={styles.modalTitle}>ACCENT COLOR</Text>
+            <View style={styles.swatchGrid}>
+              {ACCENTS.map((a) => (
+                <Pressable
+                  key={a.key}
+                  onPress={() => setAccent(a.key)}
+                  style={[
+                    styles.swatch,
+                    { backgroundColor: a.hex },
+                    accent === a.key && styles.swatchActive,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Accent ${a.label}`}
+                  accessibilityState={{ selected: accent === a.key }}
+                  hitSlop={6}
+                />
+              ))}
+            </View>
+            <Text style={styles.modalHint}>Colors the whole app, cart, and trail.</Text>
           </View>
         </View>
       </Modal>

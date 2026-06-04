@@ -5,12 +5,15 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  TextInput,
+  Modal,
   LayoutAnimation,
   Platform,
   UIManager,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useKeepAwake } from 'expo-keep-awake';
 import MapView, {
   Polyline,
@@ -20,13 +23,18 @@ import MapView, {
   type LongPressEvent,
 } from 'react-native-maps';
 import Svg, { Rect, Path } from 'react-native-svg';
-import { fonts, palettes, spacing, radius, type ThemePalette } from '@/theme';
+import { fonts, spacing, radius, type ThemePalette } from '@/theme';
 import { useAppearance } from '@/context/AppearanceContext';
 import { useTrip } from '@/context/TripContext';
 import { useBattery } from '@/context/BatteryContext';
 import { useDaylightMessage } from '@/hooks/useDaylightMessage';
-import { updateCheckpointCoordinates, type Checkpoint } from '@/db';
-import { SAVED_LOOP_ORIGIN } from '@/data/savedLoops';
+import {
+  createCheckpoint,
+  deleteCheckpoint,
+  renameCheckpoint,
+  updateCheckpointCoordinates,
+  type Checkpoint,
+} from '@/db';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -38,16 +46,17 @@ const GPS_HEADING_MIN_MPH = 1.5;
 const AUTOFLATTEN_MPH = 15;
 
 /**
- * Checkpoints seed at SAVED_LOOP_ORIGIN until the user long-presses to place
- * them. An unplaced checkpoint still sits on the seed coordinate, so we treat
- * "near the origin" as unset and skip drawing it (otherwise every place stacks
- * on one far-away point and clutters the map).
+ * Street vs Course mode. Street is the default 3D street map for cruising the
+ * neighborhood; Course swaps to hybrid satellite imagery (the same view you get
+ * in Apple/Google Maps) so the fairways, greens, and cart paths show through —
+ * a "golf course mode" without needing any licensed course data.
  */
-function isPlaced(cp: Checkpoint): boolean {
-  const dLat = Math.abs(cp.latitude - SAVED_LOOP_ORIGIN.latitude);
-  const dLng = Math.abs(cp.longitude - SAVED_LOOP_ORIGIN.longitude);
-  return dLat > 1e-5 || dLng > 1e-5;
-}
+type MapMode = 'street' | 'course';
+const MAP_MODE_KEY = 'mapMode';
+
+type PlaceEditor =
+  | { mode: 'add'; name: string }
+  | { mode: 'rename'; id: number; name: string };
 
 type LatLng = { latitude: number; longitude: number };
 
@@ -84,17 +93,7 @@ function formatDistance(meters: number): string {
   return `${(meters / 1609.344).toFixed(2)} mi`;
 }
 
-const PLACE_ORDER = ['home', 'kids_pool', 'big_park', 'amphitheatre'] as const;
-
-const PLACE_LABELS: Record<(typeof PLACE_ORDER)[number], string> = {
-  home: 'Home',
-  kids_pool: 'Pool',
-  big_park: 'Big Park',
-  amphitheatre: 'Amphitheatre',
-};
-
-function createMapStyles(palette: ThemePalette) {
-  const isDay = palette === palettes.day;
+function createMapStyles(palette: ThemePalette, isDay: boolean) {
   const overlayCardBg = isDay ? 'rgba(232,230,227,0.94)' : 'rgba(10,10,10,0.85)';
   const sunsetBg = isDay ? 'rgba(220,218,214,0.92)' : 'rgba(22,22,22,0.92)';
   const loopChipBg = isDay ? 'rgba(212,210,206,0.95)' : 'rgba(10,10,10,0.9)';
@@ -191,13 +190,36 @@ function createMapStyles(palette: ThemePalette) {
       fontSize: 16,
       letterSpacing: 0.5,
     },
-    centerChipRow: {
+    controlRow: {
       marginHorizontal: spacing.lg,
       marginTop: spacing.sm,
       flexDirection: 'row',
-      justifyContent: 'flex-end',
-      gap: spacing.sm,
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
+    rightChips: { flexDirection: 'row', gap: spacing.sm },
+    // Street/Course segmented control
+    modeSegment: {
+      flexDirection: 'row',
+      backgroundColor: overlayCardBg,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      padding: 3,
+    },
+    modeSegmentItem: {
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.pill,
+    },
+    modeSegmentItemActive: { backgroundColor: palette.forgeOrange },
+    modeSegmentText: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 2,
+    },
+    modeSegmentTextActive: { color: palette.ink },
     centerChip: {
       paddingVertical: spacing.xs,
       paddingHorizontal: spacing.md,
@@ -252,29 +274,33 @@ function createMapStyles(palette: ThemePalette) {
       borderWidth: 2,
       borderColor: palette.white,
     },
-    chipDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      marginRight: 6,
-      borderWidth: 1.5,
-      borderColor: palette.forgeOrange,
-    },
-    chipDotPlaced: { backgroundColor: palette.forgeOrange },
     loopBar: {
       position: 'absolute',
       bottom: 0,
       left: 0,
       right: 0,
     },
+    loopBarHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+    },
     loopBarTitle: {
       color: palette.dimmer,
       fontFamily: fonts.bold,
       fontSize: 10,
       letterSpacing: 3,
-      marginBottom: spacing.xs,
-      marginHorizontal: spacing.lg,
     },
+    placeActions: { flexDirection: 'row', gap: spacing.md },
+    placeActionText: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 1,
+    },
+    placeActionDanger: { color: palette.danger },
     placeHint: {
       color: palette.dim,
       fontFamily: fonts.body,
@@ -319,48 +345,121 @@ function createMapStyles(palette: ThemePalette) {
     loopChipTextSelected: {
       color: palette.forgeOrange,
     },
+    chipDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: 6,
+      backgroundColor: palette.forgeOrange,
+    },
+    addChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: palette.forgeOrange,
+      backgroundColor: loopChipBg,
+    },
+    addChipText: {
+      color: palette.forgeOrange,
+      fontFamily: fonts.bold,
+      fontSize: 13,
+      letterSpacing: 1,
+    },
+    // Add / rename modal
+    modalRoot: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+    modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+    modalCard: {
+      width: '100%',
+      maxWidth: 340,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      backgroundColor: palette.slateElevated,
+      padding: spacing.lg,
+    },
+    modalTitle: {
+      color: palette.dim,
+      fontFamily: fonts.bold,
+      fontSize: 11,
+      letterSpacing: 4,
+      marginBottom: spacing.md,
+      textAlign: 'center',
+    },
+    modalInput: {
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      borderRadius: radius.md,
+      backgroundColor: palette.slate,
+      color: palette.white,
+      fontFamily: fonts.display,
+      fontSize: 18,
+      paddingVertical: 10,
+      paddingHorizontal: spacing.md,
+      marginBottom: spacing.md,
+    },
+    modalBtnRow: { flexDirection: 'row', gap: spacing.sm },
+    modalBtn: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: palette.slateBorder,
+      backgroundColor: palette.slate,
+      alignItems: 'center',
+    },
+    modalBtnPrimary: {
+      borderColor: palette.forgeOrange,
+      backgroundColor: palette.forgeOrange,
+    },
+    modalBtnText: {
+      color: palette.bone,
+      fontFamily: fonts.display,
+      fontSize: 15,
+      letterSpacing: 2,
+    },
+    modalBtnTextPrimary: { color: palette.ink },
   });
-}
-
-const PLACE_KEY_SET = new Set<string>(PLACE_ORDER);
-
-function sortPlaces(checkpoints: Checkpoint[]): Checkpoint[] {
-  const order = new Map(PLACE_ORDER.map((key, i) => [key, i]));
-  return [...checkpoints].sort((a, b) => {
-    const ai = order.get(a.key as (typeof PLACE_ORDER)[number]) ?? 99;
-    const bi = order.get(b.key as (typeof PLACE_ORDER)[number]) ?? 99;
-    return ai - bi;
-  });
-}
-
-function placeLabel(cp: Checkpoint): string {
-  return PLACE_LABELS[cp.key as (typeof PLACE_ORDER)[number]] ?? cp.name;
 }
 
 export default function MapScreen() {
   useKeepAwake();
   const { palette, resolved } = useAppearance();
-  const styles = useMemo(() => createMapStyles(palette), [palette]);
+  const isDay = resolved === 'day';
+  const styles = useMemo(() => createMapStyles(palette, isDay), [palette, isDay]);
   const trip = useTrip();
   const battery = useBattery();
   const mapRef = useRef<MapView | null>(null);
   const [isFollowing, setIsFollowing] = useState(true);
   const [is3D, setIs3D] = useState(true); // 3D tilt on by default
-  const [armedPlaceKey, setArmedPlaceKey] = useState<string | null>(null);
+  const [mapMode, setMapModeState] = useState<MapMode>('street');
+  const [armedPlaceId, setArmedPlaceId] = useState<number | null>(null);
+  const [placeEditor, setPlaceEditor] = useState<PlaceEditor | null>(null);
   const lastMovingHeadingRef = useRef(0);
+
+  // Restore the last-used map mode.
+  useEffect(() => {
+    AsyncStorage.getItem(MAP_MODE_KEY).then((v) => {
+      if (v === 'street' || v === 'course') setMapModeState(v);
+    });
+  }, []);
+
+  const setMapMode = useCallback((m: MapMode) => {
+    setMapModeState(m);
+    AsyncStorage.setItem(MAP_MODE_KEY, m).catch(() => {});
+  }, []);
 
   const daylight = useDaylightMessage(
     trip.position?.latitude ?? null,
     trip.position?.longitude ?? null,
   );
 
-  const sortedPlaces = useMemo(
-    () => sortPlaces(trip.checkpoints.filter((cp) => PLACE_KEY_SET.has(cp.key))),
-    [trip.checkpoints],
-  );
-
-  const armedPlace = armedPlaceKey
-    ? sortedPlaces.find((cp) => cp.key === armedPlaceKey) ?? null
+  const places = trip.checkpoints;
+  const armedPlace = armedPlaceId != null
+    ? places.find((cp) => cp.id === armedPlaceId) ?? null
     : null;
 
   const mapHeading =
@@ -368,7 +467,7 @@ export default function MapScreen() {
 
   // Distance + heading-relative bearing from the cart to the selected place.
   const targetInfo = useMemo(() => {
-    if (!armedPlace || !isPlaced(armedPlace) || !trip.position) return null;
+    if (!armedPlace || !trip.position) return null;
     const to = { latitude: armedPlace.latitude, longitude: armedPlace.longitude };
     const meters = haversineMeters(trip.position, to);
     const relative = ((bearingDeg(trip.position, to) - mapHeading) % 360 + 360) % 360;
@@ -429,27 +528,72 @@ export default function MapScreen() {
     animateToCart();
   }, [trip.position?.latitude, trip.position?.longitude, isFollowing, animateToCart]);
 
-  const togglePlace = (key: string) => {
+  const togglePlace = (id: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setArmedPlaceKey((prev) => (prev === key ? null : key));
+    setArmedPlaceId((prev) => (prev === id ? null : id));
+  };
+
+  const openAddPlace = () => {
+    if (!trip.position) {
+      Alert.alert('No GPS fix yet', 'Wait for your location, then add a place where the cart is.');
+      return;
+    }
+    setPlaceEditor({ mode: 'add', name: '' });
+  };
+
+  const openRenamePlace = (cp: Checkpoint) => {
+    setPlaceEditor({ mode: 'rename', id: cp.id, name: cp.name });
+  };
+
+  const savePlaceEditor = () => {
+    if (!placeEditor) return;
+    const name = placeEditor.name.trim() || 'Place';
+    if (placeEditor.mode === 'add') {
+      if (!trip.position) return;
+      const cp = createCheckpoint({
+        name,
+        latitude: trip.position.latitude,
+        longitude: trip.position.longitude,
+      });
+      trip.refreshCheckpoints();
+      setArmedPlaceId(cp.id);
+    } else {
+      renameCheckpoint(placeEditor.id, name);
+      trip.refreshCheckpoints();
+    }
+    setPlaceEditor(null);
+  };
+
+  const removePlace = (cp: Checkpoint) => {
+    Alert.alert(`Remove ${cp.name}?`, 'This deletes the place from your map.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => {
+          deleteCheckpoint(cp.id);
+          if (armedPlaceId === cp.id) setArmedPlaceId(null);
+          trip.refreshCheckpoints();
+        },
+      },
+    ]);
   };
 
   const handleMapLongPress = (event: LongPressEvent) => {
     const { coordinate } = event.nativeEvent;
     if (!armedPlace) {
-      Alert.alert('Select a place', 'Tap Home, Pool, Big Park, or Amphitheatre first.');
+      Alert.alert('Pick a place first', 'Tap a place chip below (or + Add) before long-pressing to move it.');
       return;
     }
-    const label = placeLabel(armedPlace);
     Alert.alert(
-      `Set ${label} here?`,
+      `Move ${armedPlace.name} here?`,
       `${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Set',
+          text: 'Move',
           onPress: () => {
-            updateCheckpointCoordinates(armedPlace.key, coordinate.latitude, coordinate.longitude);
+            updateCheckpointCoordinates(armedPlace.id, coordinate.latitude, coordinate.longitude);
             trip.refreshCheckpoints();
             setIsFollowing(false);
           },
@@ -477,6 +621,7 @@ export default function MapScreen() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={PROVIDER_DEFAULT}
+        mapType={mapMode === 'course' ? 'hybrid' : 'standard'}
         userInterfaceStyle={resolved === 'day' ? 'light' : 'dark'}
         showsUserLocation={false}
         showsCompass={false}
@@ -496,33 +641,43 @@ export default function MapScreen() {
           longitudeDelta: MAP_ZOOM_DELTA,
         }}
       >
-        {trip.checkpoints.filter(isPlaced).map((cp) => (
+        {places.map((cp) => (
           <React.Fragment key={cp.id}>
             <Circle
               center={{ latitude: cp.latitude, longitude: cp.longitude }}
               radius={cp.radiusMeters}
-              strokeColor="rgba(255, 106, 26, 0.45)"
-              fillColor="rgba(255, 106, 26, 0.06)"
+              strokeColor={palette.forgeOrange}
+              fillColor={palette.forgeOrangeGlow}
               strokeWidth={1}
             />
             <Marker
               coordinate={{ latitude: cp.latitude, longitude: cp.longitude }}
               anchor={{ x: 0.5, y: 1 }}
-              title={placeLabel(cp)}
+              title={cp.name}
             >
               <View style={styles.placePinWrap}>
-                <Text style={styles.placePinLabel}>{placeLabel(cp)}</Text>
+                <Text style={styles.placePinLabel}>{cp.name}</Text>
                 <View style={styles.placePin} />
               </View>
             </Marker>
           </React.Fragment>
         ))}
         {trip.breadcrumb.length > 1 && (
-          <Polyline
-            coordinates={trip.breadcrumb}
-            strokeColor={palette.forgeOrange}
-            strokeWidth={4}
-          />
+          <>
+            {/* Course mode: dark casing under the trail so it reads over satellite greens. */}
+            {mapMode === 'course' && (
+              <Polyline
+                coordinates={trip.breadcrumb}
+                strokeColor="rgba(0,0,0,0.55)"
+                strokeWidth={9}
+              />
+            )}
+            <Polyline
+              coordinates={trip.breadcrumb}
+              strokeColor={palette.forgeOrange}
+              strokeWidth={mapMode === 'course' ? 5 : 4}
+            />
+          </>
         )}
         <Marker coordinate={trip.position} anchor={{ x: 0.5, y: 0.5 }} flat rotation={0}>
           <View style={styles.cartMarker}>
@@ -559,73 +714,151 @@ export default function MapScreen() {
             {daylight.status === 'waiting' ? '—' : daylight.message}
           </Text>
         </View>
-        <View style={styles.centerChipRow} pointerEvents="box-none">
-          <Pressable
-            onPress={toggle3D}
-            style={[styles.centerChip, is3D && styles.centerChipActive]}
-          >
-            <Text style={[styles.centerChipText, is3D && styles.centerChipTextActive]}>
-              3D
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              setIsFollowing(true);
-              animateToCart(400);
-            }}
-            style={[styles.centerChip, isFollowing && styles.centerChipActive]}
-          >
-            <Text style={[styles.centerChipText, isFollowing && styles.centerChipTextActive]}>
-              CENTER
-            </Text>
-          </Pressable>
+        <View style={styles.controlRow} pointerEvents="box-none">
+          <View style={styles.modeSegment}>
+            {(['street', 'course'] as const).map((m) => {
+              const active = mapMode === m;
+              return (
+                <Pressable
+                  key={m}
+                  onPress={() => setMapMode(m)}
+                  style={[styles.modeSegmentItem, active && styles.modeSegmentItemActive]}
+                >
+                  <Text style={[styles.modeSegmentText, active && styles.modeSegmentTextActive]}>
+                    {m === 'street' ? 'STREET' : 'COURSE'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.rightChips}>
+            <Pressable
+              onPress={toggle3D}
+              style={[styles.centerChip, is3D && styles.centerChipActive]}
+            >
+              <Text style={[styles.centerChipText, is3D && styles.centerChipTextActive]}>3D</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setIsFollowing(true);
+                animateToCart(400);
+              }}
+              style={[styles.centerChip, isFollowing && styles.centerChipActive]}
+            >
+              <Text style={[styles.centerChipText, isFollowing && styles.centerChipTextActive]}>
+                CENTER
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </SafeAreaView>
 
       <SafeAreaView edges={['bottom']} style={styles.loopBar} pointerEvents="box-none">
-        <Text style={styles.loopBarTitle}>PLACES</Text>
-        {armedPlace != null &&
-          (targetInfo ? (
+        <View style={styles.loopBarHeader}>
+          <Text style={styles.loopBarTitle}>PLACES</Text>
+          {armedPlace != null && (
+            <View style={styles.placeActions}>
+              <Pressable onPress={() => openRenamePlace(armedPlace)} hitSlop={8}>
+                <Text style={styles.placeActionText}>RENAME</Text>
+              </Pressable>
+              <Pressable onPress={() => removePlace(armedPlace)} hitSlop={8}>
+                <Text style={[styles.placeActionText, styles.placeActionDanger]}>REMOVE</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+        {armedPlace != null ? (
+          targetInfo ? (
             <>
               <View style={styles.directionRow}>
                 <DirectionArrow deg={targetInfo.relative} color={palette.forgeOrange} />
                 <Text style={styles.directionText}>
-                  {placeLabel(armedPlace)} · {formatDistance(targetInfo.meters)}
+                  {armedPlace.name} · {formatDistance(targetInfo.meters)}
                 </Text>
               </View>
-              <Text style={styles.placeHint}>Long-press map to move this pin</Text>
+              <Text style={styles.placeHint}>Long-press the map to move this pin</Text>
             </>
           ) : (
-            <>
-              <Text style={styles.placeHint}>Long-press map to set</Text>
-              <Text style={styles.placeCoords}>
-                {armedPlace.latitude.toFixed(6)}, {armedPlace.longitude.toFixed(6)}
-              </Text>
-            </>
-          ))}
+            <Text style={styles.placeCoords}>
+              {armedPlace.latitude.toFixed(6)}, {armedPlace.longitude.toFixed(6)}
+            </Text>
+          )
+        ) : places.length === 0 ? (
+          <Text style={styles.placeHint}>
+            No places yet — tap + Add to drop your cart spot, the clubhouse, home, anywhere.
+          </Text>
+        ) : (
+          <Text style={styles.placeHint}>Tap a place to see distance and direction to it.</Text>
+        )}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.loopScroll}
         >
-          {sortedPlaces.map((cp) => {
-            const selected = armedPlaceKey === cp.key;
-            const placed = isPlaced(cp);
+          {places.map((cp) => {
+            const selected = armedPlaceId === cp.id;
             return (
               <Pressable
-                key={cp.key}
-                onPress={() => togglePlace(cp.key)}
+                key={cp.id}
+                onPress={() => togglePlace(cp.id)}
                 style={[styles.loopChip, selected && styles.loopChipSelected]}
               >
-                <View style={[styles.chipDot, placed && styles.chipDotPlaced]} />
+                <View style={styles.chipDot} />
                 <Text style={[styles.loopChipText, selected && styles.loopChipTextSelected]}>
-                  {placeLabel(cp)}
+                  {cp.name}
                 </Text>
               </Pressable>
             );
           })}
+          <Pressable onPress={openAddPlace} style={styles.addChip}>
+            <Text style={styles.addChipText}>+ ADD</Text>
+          </Pressable>
         </ScrollView>
       </SafeAreaView>
+
+      <Modal
+        visible={placeEditor != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPlaceEditor(null)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setPlaceEditor(null)}
+            accessibilityLabel="Close"
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {placeEditor?.mode === 'rename' ? 'RENAME PLACE' : 'ADD PLACE HERE'}
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={placeEditor?.name ?? ''}
+              onChangeText={(t) =>
+                setPlaceEditor((prev) => (prev ? { ...prev, name: t } : prev))
+              }
+              placeholder="Clubhouse, Home, Cart Barn…"
+              placeholderTextColor={palette.dimmer}
+              autoFocus
+              maxLength={40}
+              returnKeyType="done"
+              onSubmitEditing={savePlaceEditor}
+            />
+            <View style={styles.modalBtnRow}>
+              <Pressable style={styles.modalBtn} onPress={() => setPlaceEditor(null)}>
+                <Text style={styles.modalBtnText}>CANCEL</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={savePlaceEditor}
+              >
+                <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>SAVE</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
