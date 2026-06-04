@@ -28,17 +28,21 @@ export type ThemePalette = {
 /** A selectable accent preset. */
 export type Accent = { key: string; label: string; hex: string };
 
-/** Primary accent colors the user can choose from. First entry is the default. */
+/**
+ * Primary accent colors the user can choose from. First entry is the default.
+ * The red/blue/green/gold anchors match local team colors (UofL Cardinal,
+ * UK Wildcat Blue, Trinity/St. X hunter green, St. X gold).
+ */
 export const ACCENTS: Accent[] = [
   { key: 'orange', label: 'Orange', hex: '#FF6A1A' },
-  { key: 'amber', label: 'Amber', hex: '#FFB000' },
-  { key: 'lime', label: 'Lime', hex: '#5DD63B' },
-  { key: 'green', label: 'Green', hex: '#2FA84F' },
-  { key: 'teal', label: 'Teal', hex: '#15C2A8' },
+  { key: 'cardinal', label: 'Cardinal', hex: '#AD0000' },
+  { key: 'blue', label: 'Blue', hex: '#0033A0' },
+  { key: 'green', label: 'Green', hex: '#1C7C43' },
+  { key: 'gold', label: 'Gold', hex: '#F4C430' },
+  { key: 'purple', label: 'Purple', hex: '#582C83' },
   { key: 'sky', label: 'Sky', hex: '#2E9BFF' },
-  { key: 'violet', label: 'Violet', hex: '#7C5CFF' },
+  { key: 'teal', label: 'Teal', hex: '#15C2A8' },
   { key: 'pink', label: 'Pink', hex: '#FF4D8D' },
-  { key: 'red', label: 'Red', hex: '#FF453A' },
   { key: 'cyan', label: 'Cyan', hex: '#00CFE0' },
 ];
 
