@@ -42,6 +42,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const MAP_ZOOM_DELTA = 0.0022;
+/** Zoom level the follow camera drives to (≈ neighborhood/course-hole scale). */
+const FOLLOW_ZOOM = 17;
 const GPS_HEADING_MIN_MPH = 1.5;
 /** Above this speed the 3D tilt auto-flattens to top-down for clarity. */
 const AUTOFLATTEN_MPH = 15;
@@ -489,29 +491,23 @@ export default function MapScreen() {
   }, [trip.speedMph, trip.headingDeg]);
 
   const animateToCart = useCallback(
-    async (duration = 600) => {
+    (duration = 600) => {
       const map = mapRef.current;
       if (!trip.position || !map) return;
-      // Preserve the current zoom/altitude. On iOS (Apple Maps) a camera with no
-      // altitude resets to a fully zoomed-out world view; because this runs on
-      // every GPS tick it kept overriding pinch-to-zoom, so the map appeared
-      // stuck zoomed all the way out. Reading the live camera keeps the user's
-      // zoom and only moves the center/heading/pitch.
-      let camera: Awaited<ReturnType<typeof map.getCamera>> | undefined;
-      try {
-        camera = await map.getCamera();
-      } catch {
-        camera = undefined;
-      }
+      // Drive to an EXPLICIT zoom. Apple Maps falls back to a default world
+      // altitude when a camera has none, which on a real device made the map
+      // appear stuck zoomed all the way out (the simulator hid it by locking
+      // location instantly). A pinch/pan gesture releases follow (see
+      // handleRegionChangeComplete), so this never fights the user's own zoom.
       map.animateCamera(
         {
-          ...(camera ?? {}),
           center: {
             latitude: trip.position.latitude,
             longitude: trip.position.longitude,
           },
           heading: mapHeading,
           pitch: is3D && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
+          zoom: FOLLOW_ZOOM,
         },
         { duration },
       );
@@ -523,26 +519,28 @@ export default function MapScreen() {
     const next = !is3D;
     setIs3D(next);
     const map = mapRef.current;
-    if (!trip.position || !map) return;
+    if (!map) return;
+    // Tilt in place: keep the current center and zoom, only change pitch.
     let camera: Awaited<ReturnType<typeof map.getCamera>> | undefined;
     try {
       camera = await map.getCamera();
     } catch {
       camera = undefined;
     }
+    if (!camera) return;
     map.animateCamera(
-      {
-        ...(camera ?? {}),
-        center: {
-          latitude: trip.position.latitude,
-          longitude: trip.position.longitude,
-        },
-        heading: mapHeading,
-        pitch: next && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0,
-      },
+      { ...camera, pitch: next && trip.speedMph < AUTOFLATTEN_MPH ? 55 : 0 },
       { duration: 500 },
     );
-  }, [is3D, trip.position, mapHeading, trip.speedMph]);
+  }, [is3D, trip.speedMph]);
+
+  // A user pinch/pan/zoom releases follow so we stop overriding their camera.
+  const handleRegionChangeComplete = useCallback(
+    (_region: unknown, details?: { isGesture?: boolean }) => {
+      if (details?.isGesture) setIsFollowing(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isFollowing) return;
@@ -654,6 +652,7 @@ export default function MapScreen() {
         zoomEnabled
         pitchEnabled
         onPanDrag={() => setIsFollowing(false)}
+        onRegionChangeComplete={handleRegionChangeComplete}
         onLongPress={handleMapLongPress}
         initialRegion={{
           latitude: trip.position.latitude,
