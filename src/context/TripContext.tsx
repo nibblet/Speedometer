@@ -135,6 +135,11 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkpointsRef = useRef<Checkpoint[]>(checkpoints);
   const insideCheckpointIdsRef = useRef<Set<number>>(new Set());
+  // iOS often stops delivering watchPositionAsync callbacks after backgrounding;
+  // tear down and recreate subscriptions whenever we leave/return foreground.
+  const [appForeground, setAppForeground] = useState(
+    () => AppState.currentState === 'active',
+  );
 
   // Keep a ref of latest state so AppState listener can read it without stale closure.
   useEffect(() => {
@@ -189,9 +194,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     return granted;
   }, []);
 
-  // Start GPS subscriptions when permission granted
+  // Start GPS subscriptions when permission granted and app is in foreground
   useEffect(() => {
-    if (!state.hasPermission) return;
+    if (!state.hasPermission || !appForeground) return;
 
     let cancelled = false;
 
@@ -315,13 +320,18 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       headingSubRef.current = null;
       if (tickRef.current) clearInterval(tickRef.current);
     };
-  }, [state.hasPermission]);
+  }, [state.hasPermission, appForeground]);
 
-  // Save trip when app backgrounds
+  // Save trip when fully backgrounded; pause GPS there, resume on active.
+  // Do not use `inactive` — iOS fires it when returning (background → inactive → active),
+  // which would spuriously reset the trip and leave stale location watchers running.
   useEffect(() => {
     const handler = (next: AppStateStatus) => {
-      if (next === 'background' || next === 'inactive') {
+      if (next === 'background') {
         persistAndReset();
+        setAppForeground(false);
+      } else if (next === 'active') {
+        setAppForeground(true);
       }
     };
     const sub = AppState.addEventListener('change', handler);

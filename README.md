@@ -106,7 +106,7 @@ every component reads from there.
 - **`SPEED_MAX_MPH = 25`** in `src/theme.ts` — change here to recalibrate the dial
 - **GPS smoothing**: 4-sample moving average; speeds < 0.5 mph snap to 0 to keep the needle still at idle
 - **Heading source**: GPS course-over-ground when moving > 1.5 mph, magnetometer (`watchHeadingAsync`) when stationary
-- **Trip lifecycle**: a trip starts on app launch, ends on `AppState` `background`/`inactive`, and is saved to SQLite if it covered ≥ 0.02 mi (~100 ft)
+- **Trip lifecycle**: a trip starts on app launch, ends when the app is fully backgrounded (`AppState` `background`), and is saved to SQLite if it covered ≥ 0.02 mi (~100 ft)
 - **Map**: course-up Apple Maps (rotates with your heading while moving); pan/zoom freely — tap **CENTER** to resume GPS follow; ~20% closer default zoom than before
 - **Daylight banner**: time-of-day messages (sunrise/sunset windows, golden hour, lunch lap, headlights countdown) via SunCalc + local clock — see `src/hooks/useDaylightMessage.ts`
 - **Places**: four saved spots (Barn, Pool, Big Park, Amphitheatre) stored in SQLite; orange geofence circles log enter/exit while driving
