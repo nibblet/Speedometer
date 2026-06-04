@@ -4,12 +4,15 @@
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
+    "start:personal": "EXPO_PUBLIC_ENABLE_BATTERY=1 expo start --dev-client",
     "start:go": "expo start --go",
     "start:dev": "expo start --dev-client",
     "start:tunnel": "expo start --dev-client --tunnel",
     "build:ios:standalone": "eas build --profile preview --platform ios",
+    "build:ios:personal": "eas build --profile personal --platform ios",
     "build:ios:store": "eas build --profile production --platform ios",
     "ios": "expo run:ios",
+    "ios:personal": "EXPO_PUBLIC_ENABLE_BATTERY=1 expo run:ios",
     "ios:release": "expo prebuild --platform ios --no-install && expo run:ios --configuration Release",
     "ios:sim": "expo start --ios --go",
     "android": "expo run:android"
