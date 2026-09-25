@@ -29,6 +29,7 @@ import { useTrip } from '@/context/TripContext';
 import { useBattery } from '@/context/BatteryContext';
 import { useDaylightMessage } from '@/hooks/useDaylightMessage';
 import { FEATURES } from '@/config';
+import { LocationPermissionPrompt } from '@/components/LocationPermissionPrompt';
 import {
   createCheckpoint,
   deleteCheckpoint,
@@ -621,7 +622,17 @@ export default function MapScreen() {
     );
   };
 
-  if (!trip.hasPermission || !trip.position) {
+  if (!trip.hasPermission) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.empty}>
+          <LocationPermissionPrompt />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!trip.position) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.empty}>

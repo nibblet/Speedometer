@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import { saveTrip, listCheckpoints, type Checkpoint } from '@/db';
 
@@ -17,6 +17,9 @@ const MIN_MOVE_METERS = 1.5; // ignore GPS jitter below this when adding distanc
 const MIN_DISTANCE_FOR_SAVE_MILES = 0.02; // skip trips < ~100ft
 
 export type LatLng = { latitude: number; longitude: number };
+
+/** 'blocked' = denied and iOS won't prompt again; only Settings can fix it. */
+export type PermissionStatus = 'unknown' | 'granted' | 'denied' | 'blocked';
 
 type TripState = {
   hasPermission: boolean;
@@ -33,6 +36,9 @@ type TripState = {
 type TripContextValue = TripState & {
   resetTrip: () => void;
   requestPermission: () => Promise<boolean>;
+  permissionStatus: PermissionStatus;
+  /** Opens this app's page in iOS Settings so the user can turn location back on. */
+  openLocationSettings: () => void;
   /** Dev-only: synthetic speed/heading for testing UI without driving */
   devSimulateMotion: boolean;
   setDevSimulateMotion: (on: boolean) => void;
@@ -86,6 +92,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<TripState>(initialState);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>(loadCheckpointsSafe);
   const [devSimulateMotion, setDevSimulateMotion] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<PermissionStatus>('unknown');
   const simTRef = useRef(0);
   const simFrameRef = useRef<number | null>(null);
   const devSimulateMotionRef = useRef(false);
@@ -142,12 +149,37 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     resetTrip();
   }, [resetTrip]);
 
+  const applyPermission = useCallback(
+    (res: Location.LocationPermissionResponse) => {
+      const granted = res.status === 'granted';
+      setPermissionStatus(granted ? 'granted' : res.canAskAgain ? 'denied' : 'blocked');
+      setState((p) => (p.hasPermission === granted ? p : { ...p, hasPermission: granted }));
+      return granted;
+    },
+    [],
+  );
+
   const requestPermission = useCallback(async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    const granted = status === 'granted';
-    setState((p) => ({ ...p, hasPermission: granted }));
-    return granted;
+    try {
+      return applyPermission(await Location.requestForegroundPermissionsAsync());
+    } catch (e) {
+      console.warn('Location permission request failed', e);
+      return false;
+    }
+  }, [applyPermission]);
+
+  const openLocationSettings = useCallback(() => {
+    Linking.openSettings().catch(() => {});
   }, []);
+
+  // Re-check on every return to the foreground: the user may have just flipped
+  // location on (or off) in Settings, and iOS doesn't tell us otherwise.
+  useEffect(() => {
+    if (!appForeground || permissionStatus === 'unknown') return;
+    Location.getForegroundPermissionsAsync()
+      .then(applyPermission)
+      .catch(() => {});
+  }, [appForeground]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start GPS subscriptions when permission granted and app is in foreground
   useEffect(() => {
@@ -325,6 +357,8 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       ...state,
       resetTrip,
       requestPermission,
+      permissionStatus,
+      openLocationSettings,
       devSimulateMotion: __DEV__ ? devSimulateMotion : false,
       setDevSimulateMotion: __DEV__
         ? setDevSimulateMotion
@@ -334,7 +368,16 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       checkpoints,
       refreshCheckpoints,
     }),
-    [state, resetTrip, requestPermission, devSimulateMotion, checkpoints, refreshCheckpoints],
+    [
+      state,
+      resetTrip,
+      requestPermission,
+      permissionStatus,
+      openLocationSettings,
+      devSimulateMotion,
+      checkpoints,
+      refreshCheckpoints,
+    ],
   );
 
   return <TripContext.Provider value={value}>{children}</TripContext.Provider>;

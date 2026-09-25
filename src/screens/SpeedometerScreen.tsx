@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Pressable,
   useWindowDimensions,
-  ActivityIndicator,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +18,7 @@ import { useAppearance, type AppearanceMode } from '@/context/AppearanceContext'
 import { AnalogDial } from '@/components/AnalogDial';
 import { CompassRose } from '@/components/CompassRose';
 import { DigitalReadout } from '@/components/DigitalReadout';
+import { LocationPermissionPrompt } from '@/components/LocationPermissionPrompt';
 
 type Mode = 'analog' | 'digital';
 
@@ -169,20 +169,6 @@ function createStyles(palette: ThemePalette) {
       fontFamily: fonts.display,
       fontSize: 18,
       letterSpacing: 1,
-    },
-    permission: { alignItems: 'center', gap: 16 },
-    permissionText: { color: palette.dim, fontFamily: fonts.body, fontSize: 14 },
-    permissionBtn: {
-      backgroundColor: palette.forgeOrange,
-      paddingVertical: 12,
-      paddingHorizontal: 24,
-      borderRadius: radius.pill,
-    },
-    permissionBtnText: {
-      color: palette.ink,
-      fontFamily: fonts.display,
-      fontSize: 14,
-      letterSpacing: 2,
     },
     modalRoot: {
       flex: 1,
@@ -449,15 +435,7 @@ export default function SpeedometerScreen() {
 
       <View style={styles.center}>
         {!trip.hasPermission ? (
-            <View style={styles.permission}>
-              <ActivityIndicator color={palette.forgeOrange} />
-              <Text style={styles.permissionText}>
-                Waiting for location permission…
-              </Text>
-              <Pressable style={styles.permissionBtn} onPress={trip.requestPermission}>
-                <Text style={styles.permissionBtnText}>Grant Access</Text>
-              </Pressable>
-            </View>
+            <LocationPermissionPrompt />
           ) : mode === 'analog' ? (
             <View style={[styles.dialStack, { width: dialSize, height: dialSize }]}>
               <AnalogDial size={dialSize} speed={trip.speedMph} max={SPEED_MAX_MPH} />

@@ -1,7 +1,23 @@
-# Cart Speedo — forVEX Golf Cart Speedometer
+# CARTpath — Golf Cart Speedometer
 
-A personal iPhone speedometer for your golf cart, built with React Native + Expo.
-forVEX styling: Forge Black background, Forge Orange accents, Rajdhani display type.
+An iPhone speedometer, map, and trip log for golf carts, built with React Native + Expo.
+Forge Black background, Forge Orange accents, Rajdhani display type.
+
+All data (trips, places, settings) stays on the device — no account, no backend, no analytics.
+Privacy policy: [`docs/privacy-policy.md`](docs/privacy-policy.md).
+
+## Build profiles
+
+| Command | What you get |
+| --- | --- |
+| `npm run build:ios:store` | App Store build (EAS `production`). No Bluetooth code or permissions. |
+| `npm run build:ios:personal` | Personal build with the Runleader battery monitor (`EXPO_PUBLIC_ENABLE_BATTERY=1`). |
+| `npm run ios` / `npm run ios:personal` | Local dev builds of the same two variants. |
+
+The `EXPO_PUBLIC_ENABLE_BATTERY` flag drives three places that must stay in sync:
+`src/config.ts` (JS UI), `app.config.js` (Bluetooth permission strings + plugin), and
+`react-native.config.js` (whether `react-native-ble-plx` is linked at all). When switching
+variants locally, re-run prebuild (`npx expo prebuild --clean`) so the native project matches.
 
 ## Features
 
@@ -125,7 +141,6 @@ every component reads from there.
 
 ## Personalization Ideas
 
-- **forVEX wordmark on splash** — drop `splash.png` and `icon.png` into `src/assets/` (currently referenced but not provided)
 - **HUD mode** — mirror-flipped display for windshield reflection (the reference app had this; trivial to add as a third toggle option)
 - **Top-speed celebration** — pulse the dial frame in forge orange when you set a new max
 - **Trip route playback** — tap a history row to push a detail screen with the saved `routeJson` rendered as a polyline
